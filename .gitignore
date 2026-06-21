@@ -53,3 +53,4 @@ next-env.d.ts
 
 # backup files
 *.bak
+_ARCHIVE_OLD_SPACESTATION/
