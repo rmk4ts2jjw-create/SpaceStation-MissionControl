@@ -61,8 +61,9 @@ export async function GET() {
     const configPath = (process.env.OPENCLAW_DIR || "/root/.openclaw") + "/openclaw.json";
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
 
-    // Get agents from config
-    const agents: Agent[] = config.agents.list.map((agent: any) => {
+    // Get agents from config — support both agents.list (multi-agent) and agents.defaults (single-agent)
+    const agentList = config.agents.list || (config.agents.defaults ? [{ id: 'main', ...config.agents.defaults }] : []);
+    const agents: Agent[] = agentList.map((agent: any) => {
       const agentInfo = getAgentDisplayInfo(agent.id, agent);
 
       // Get telegram account info
