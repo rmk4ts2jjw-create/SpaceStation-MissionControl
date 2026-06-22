@@ -14,7 +14,10 @@ export default function AvatarModel({ agent, position }: AvatarModelProps) {
   const modelPath = `/models/${agent.id}.glb`;
   const [exists, setExists] = useState<boolean>(false);
 
-  // Check if file exists before trying to load
+  // Load GLB model unconditionally (hook must be at top level)
+  const { scene } = useGLTF(modelPath);
+
+  // Check if file exists before trying to render the model
   useEffect(() => {
     fetch(modelPath, { method: 'HEAD' })
       .then(res => setExists(res.ok))
@@ -39,8 +42,6 @@ export default function AvatarModel({ agent, position }: AvatarModelProps) {
   }
 
   // Load and display the GLB model
-  const { scene } = useGLTF(modelPath);
-  
   return (
     <primitive
       object={scene.clone()}
