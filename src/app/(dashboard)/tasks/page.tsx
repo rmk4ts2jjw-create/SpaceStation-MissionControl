@@ -511,30 +511,33 @@ function DetailDrawer({
         style={{
           position: "fixed",
           inset: 0,
-          backgroundColor: "rgba(0, 0, 0, 0.5)",
-          backdropFilter: "blur(4px)",
+          backgroundColor: "rgba(0, 0, 0, 0.6)",
+          backdropFilter: "blur(6px)",
           zIndex: 999,
           animation: "fadeIn 150ms ease",
         }}
       />
 
-      {/* Drawer panel */}
+      {/* Centered glass modal */}
       <div
         style={{
           position: "fixed",
-          top: 0,
-          right: 0,
-          bottom: 0,
-          width: "420px",
-          maxWidth: "90vw",
-          backgroundColor: "rgba(12, 12, 18, 0.92)",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "520px",
+          maxWidth: "92vw",
+          maxHeight: "85vh",
+          backgroundColor: "rgba(12, 12, 18, 0.95)",
           backdropFilter: "blur(24px)",
           WebkitBackdropFilter: "blur(24px)",
-          borderLeft: "1px solid rgba(255, 255, 255, 0.06)",
+          border: "1px solid rgba(255, 255, 255, 0.08)",
+          borderRadius: "16px",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)",
           zIndex: 1000,
           display: "flex",
           flexDirection: "column",
-          animation: "slideInRight 200ms cubic-bezier(0.4, 0, 0.2, 1)",
+          animation: "scaleIn 200ms cubic-bezier(0.4, 0, 0.2, 1)",
           overflow: "hidden",
         }}
       >
@@ -943,6 +946,7 @@ export default function TasksPage() {
   const [filterAssignee, setFilterAssignee] = useState<string>("all");
   const [filterProject, setFilterProject] = useState<string>("all");
   const [groupByProject, setGroupByProject] = useState<boolean>(false);
+  const [systemFilter, setSystemFilter] = useState<'all' | 'stalled' | 'ghost'>('all');
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({
     triage: PAGE_SIZE, backlog: PAGE_SIZE, in_progress: PAGE_SIZE, done: PAGE_SIZE, archived: PAGE_SIZE,
   });
@@ -951,7 +955,7 @@ export default function TasksPage() {
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 0 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -993,6 +997,12 @@ export default function TasksPage() {
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterAssignee !== "all" && t.assignee !== filterAssignee) return false;
     if (filterProject !== "all" && t.projectId !== filterProject) return false;
+    // System-level filters (stalled/ghost)
+    if (systemFilter === "stalled" && !t.stalledAt) return false;
+    if (systemFilter === "ghost") {
+      const isGhost = t.status === "in_progress" && (t.currentStep === null || t.currentStep === "Agent starting…" || t.currentStep === "Agent starting...");
+      if (!isGhost) return false;
+    }
     return true;
   });
 
@@ -1182,7 +1192,7 @@ export default function TasksPage() {
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="p-4 md:p-8">
         {/* Page Header */}
         <div style={{ marginBottom: "20px" }}>
@@ -1192,10 +1202,56 @@ export default function TasksPage() {
           <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
             {tasks.length} total · {p1Count} P1 · {p2Count} P2 · {p3Count} P3
             {(stalledCount > 0 || ghostCount > 0 || staleCount > 0) && (
-              <span style={{ marginLeft: "12px" }}>
-                {stalledCount > 0 && <span style={{ color: "#ef4444", marginRight: "8px" }}><AlertOctagon style={{ width: "12px", height: "12px", display: "inline", verticalAlign: "text-bottom", marginRight: "2px" }} />{stalledCount} stalled</span>}
-                {ghostCount > 0 && <span style={{ color: "#f59e0b", marginRight: "8px" }}><AlertTriangle style={{ width: "12px", height: "12px", display: "inline", verticalAlign: "text-bottom", marginRight: "2px" }} />{ghostCount} ghost</span>}
-                {staleCount > 0 && <span style={{ color: "#f59e0b" }}><Clock style={{ width: "12px", height: "12px", display: "inline", verticalAlign: "text-bottom", marginRight: "2px" }} />{staleCount} stale</span>}
+              <span style={{ marginLeft: "12px", display: "inline-flex", gap: "4px" }}>
+                <button
+                  onClick={() => setSystemFilter(systemFilter === "all" ? "stalled" : "all")}
+                  title="Filter: show only stalled tasks"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "2px",
+                    padding: "1px 6px", borderRadius: "4px", cursor: "pointer",
+                    border: `1px solid ${systemFilter === "stalled" ? "rgba(239,68,68,0.5)" : "rgba(239,68,68,0.2)"}`,
+                    backgroundColor: systemFilter === "stalled" ? "rgba(239,68,68,0.12)" : "transparent",
+                    color: systemFilter === "stalled" ? "#ef4444" : "rgba(239,68,68,0.6)",
+                    fontSize: "11px", fontWeight: 600,
+                    transition: "all 150ms ease",
+                  }}
+                  onMouseEnter={(e) => { if (systemFilter !== "stalled") { e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.06)"; e.currentTarget.style.color = "#ef4444"; } }}
+                  onMouseLeave={(e) => { if (systemFilter !== "stalled") { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(239,68,68,0.6)"; } }}
+                >
+                  <AlertOctagon style={{ width: "10px", height: "10px" }} />{stalledCount} stalled
+                </button>
+                <button
+                  onClick={() => setSystemFilter(systemFilter === "all" ? "ghost" : "all")}
+                  title="Filter: show only ghost tasks"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "2px",
+                    padding: "1px 6px", borderRadius: "4px", cursor: "pointer",
+                    border: `1px solid ${systemFilter === "ghost" ? "rgba(251,191,36,0.5)" : "rgba(251,191,36,0.2)"}`,
+                    backgroundColor: systemFilter === "ghost" ? "rgba(251,191,36,0.12)" : "transparent",
+                    color: systemFilter === "ghost" ? "#f59e0b" : "rgba(251,191,36,0.6)",
+                    fontSize: "11px", fontWeight: 600,
+                    transition: "all 150ms ease",
+                  }}
+                  onMouseEnter={(e) => { if (systemFilter !== "ghost") { e.currentTarget.style.backgroundColor = "rgba(251,191,36,0.06)"; e.currentTarget.style.color = "#f59e0b"; } }}
+                  onMouseLeave={(e) => { if (systemFilter !== "ghost") { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(251,191,36,0.6)"; } }}
+                >
+                  <AlertTriangle style={{ width: "10px", height: "10px" }} />{ghostCount} ghost
+                </button>
+                {systemFilter !== "all" && (
+                  <button
+                    onClick={() => setSystemFilter("all")}
+                    title="Clear filter: show all tasks"
+                    style={{
+                      padding: "1px 6px", borderRadius: "4px", cursor: "pointer",
+                      border: "1px solid rgba(148,163,184,0.2)",
+                      backgroundColor: "transparent",
+                      color: "rgba(148,163,184,0.5)",
+                      fontSize: "10px", fontWeight: 500,
+                    }}
+                  >
+                    ✕ Clear
+                  </button>
+                )}
               </span>
             )}
           </p>
@@ -1317,9 +1373,9 @@ export default function TasksPage() {
           from { opacity: 0; }
           to { opacity: 1; }
         }
-        @keyframes slideInRight {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
+        @keyframes scaleIn {
+          from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         }
       `}</style>
     </DndContext>
