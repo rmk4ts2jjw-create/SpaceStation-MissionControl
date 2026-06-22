@@ -20,9 +20,7 @@ export function Shell({ children }: ShellProps) {
       className="tenacios-shell"
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(180deg, #0a0a0f 0%, #0d1117 50%, #0a0a0f 100%)",
         color: "var(--text-primary)",
-        fontFamily: "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}
     >
       {children}
