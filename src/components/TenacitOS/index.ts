@@ -1,6 +1,8 @@
 export { Dock } from "./Dock";
+export { Shell, Panel, Card, GhostButton } from "./Shell";
 export { TopBar } from "./TopBar";
 export { StatusBar } from "./StatusBar";
+export { DevToolsHUD } from "./DevTools";
 export { SectionHeader } from "./SectionHeader";
 export { MetricCard } from "./MetricCard";
 export { AgentRow } from "./AgentRow";

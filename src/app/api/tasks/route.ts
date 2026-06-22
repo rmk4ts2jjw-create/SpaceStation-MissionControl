@@ -1,0 +1,284 @@
+import { NextRequest, NextResponse } from "next/server";
+import { safeWrite, safeRead } from "@/services/safe-write";
+import { OPENCLAW_WORKSPACE } from "@/lib/paths";
+
+export const dynamic = "force-dynamic";
+
+const TASKS_PATH = `${OPENCLAW_WORKSPACE}/data/tasks.json`;
+
+export interface Task {
+  id: string;
+  title: string;
+  assignee: string;
+  status: string;
+  priority: string;
+  ts: string;
+  note?: string;
+  linkedIncidentId?: string;
+  tags?: string[];
+  history?: Array<{
+    ts: string;
+    action: string;
+    actor: string;
+    details?: string;
+  }>;
+  lastActivity?: string;
+  currentStep?: string | null;
+  progress?: number;
+  stalledAt?: string | null;
+  wasStalled?: boolean;
+  dispatchCount?: number;
+  dispatchFailed?: boolean;
+  dispatchFailedReason?: string;
+  rcaConfidence?: number;
+}
+
+// ── GET ─────────────────────────────────────────────────────────────────────
+
+export async function GET() {
+  try {
+    const result = safeRead<Task[]>(TASKS_PATH, []);
+    if (!result.ok) {
+      console.error("[tasks API] Error reading tasks.json:", result.error);
+      return NextResponse.json(
+        { tasks: [], total: 0, error: "Failed to load tasks" },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ tasks: result.data, total: result.data.length });
+  } catch (error) {
+    console.error("[tasks API] Unhandled error:", error);
+    return NextResponse.json(
+      { tasks: [], total: 0, error: "Failed to load tasks" },
+      { status: 500 }
+    );
+  }
+}
+
+// ── PATCH ───────────────────────────────────────────────────────────────────
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id, status, action } = body;
+
+    // Archive action: move task to ARCHIVED status
+    if (action === "archive" && id) {
+      const result = safeRead<Task[]>(TASKS_PATH, []);
+      if (!result.ok) {
+        return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
+      }
+      const tasks = result.data;
+      const task = tasks.find((t) => t.id === id);
+      if (!task) {
+        return NextResponse.json({ error: "Task not found" }, { status: 404 });
+      }
+      const now = new Date().toISOString();
+      task.status = "ARCHIVED";
+      task.lastActivity = now;
+      if (!task.history) task.history = [];
+      task.history.push({
+        ts: now,
+        action: "archived",
+        actor: "user",
+        details: `Task archived from ${task.status}`,
+      });
+      const writeResult = safeWrite(TASKS_PATH, tasks);
+      if (!writeResult.ok) {
+        return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+      }
+      return NextResponse.json({ success: true, task });
+    }
+
+    // Status update (for drag-and-drop)
+    if (id && status) {
+      const validStatuses = ["triage", "backlog", "in_progress", "done", "ARCHIVED"];
+      if (!validStatuses.includes(status)) {
+        return NextResponse.json(
+          { error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` },
+          { status: 400 }
+        );
+      }
+
+      const result = safeRead<Task[]>(TASKS_PATH, []);
+      if (!result.ok) {
+        return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
+      }
+      const tasks = result.data;
+      const task = tasks.find((t) => t.id === id);
+      if (!task) {
+        return NextResponse.json({ error: "Task not found" }, { status: 404 });
+      }
+
+      const now = new Date().toISOString();
+      const oldStatus = task.status;
+      task.status = status;
+      task.lastActivity = now;
+
+      // Clear stall-related fields when moving out of in_progress
+      if (status !== "in_progress") {
+        task.currentStep = null;
+        task.progress = 0;
+        task.stalledAt = null;
+      }
+
+      // Add history entry
+      if (!task.history) task.history = [];
+      task.history.push({
+        ts: now,
+        action: "status_change",
+        actor: "user",
+        details: `Status changed from ${oldStatus} to ${status} (drag-and-drop)`,
+      });
+
+      const writeResult = safeWrite(TASKS_PATH, tasks);
+      if (!writeResult.ok) {
+        return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+      }
+
+      return NextResponse.json({ success: true, task });
+    }
+
+    // Field updates (for Detail Drawer: title, note, assignee)
+    if (id && (body.title !== undefined || body.note !== undefined || body.assignee !== undefined)) {
+      const result = safeRead<Task[]>(TASKS_PATH, []);
+      if (!result.ok) {
+        return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
+      }
+      const tasks = result.data;
+      const task = tasks.find((t) => t.id === id);
+      if (!task) {
+        return NextResponse.json({ error: "Task not found" }, { status: 404 });
+      }
+
+      const now = new Date().toISOString();
+      const changes: string[] = [];
+
+      if (body.title !== undefined && body.title !== task.title) {
+        changes.push(`title: "${task.title}" → "${body.title}"`);
+        task.title = body.title;
+      }
+      if (body.note !== undefined && body.note !== task.note) {
+        changes.push("description updated");
+        task.note = body.note;
+      }
+      if (body.assignee !== undefined && body.assignee !== task.assignee) {
+        changes.push(`assignee: ${task.assignee} → ${body.assignee}`);
+        task.assignee = body.assignee;
+      }
+
+      if (changes.length > 0) {
+        task.lastActivity = now;
+        if (!task.history) task.history = [];
+        task.history.push({
+          ts: now,
+          action: "updated",
+          actor: "user",
+          details: changes.join(", "),
+        });
+
+        const writeResult = safeWrite(TASKS_PATH, tasks);
+        if (!writeResult.ok) {
+          return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+        }
+      }
+
+      return NextResponse.json({ success: true, task });
+    }
+
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  } catch (error) {
+    console.error("[tasks API] PATCH error:", error);
+    return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
+  }
+}
+
+// ── POST ───────────────────────────────────────────────────────────────────
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { title, description, assignee, priority, status } = body;
+
+    if (!title) {
+      return NextResponse.json({ error: "Title is required" }, { status: 400 });
+    }
+
+    const result = safeRead<Task[]>(TASKS_PATH, []);
+    if (!result.ok) {
+      return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
+    }
+    const tasks = result.data;
+
+    const now = new Date().toISOString();
+    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const newTask: Task = {
+      id,
+      title,
+      assignee: assignee || "monkey",
+      status: status || "backlog",
+      priority: priority || "P3",
+      ts: now,
+      note: description || "",
+      lastActivity: now,
+      currentStep: null,
+      progress: 0,
+      history: [
+        {
+          ts: now,
+          action: "created",
+          actor: "user",
+          details: `Task created via API`,
+        },
+      ],
+    };
+
+    tasks.push(newTask);
+
+    const writeResult = safeWrite(TASKS_PATH, tasks);
+    if (!writeResult.ok) {
+      return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, task: newTask }, { status: 201 });
+  } catch (error) {
+    console.error("[tasks API] POST error:", error);
+    return NextResponse.json({ error: "Failed to create task" }, { status: 500 });
+  }
+}
+
+// ── DELETE ──────────────────────────────────────────────────────────────────
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "Task ID required" }, { status: 400 });
+    }
+
+    const result = safeRead<Task[]>(TASKS_PATH, []);
+    if (!result.ok) {
+      return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
+    }
+    const tasks = result.data;
+    const idx = tasks.findIndex((t) => t.id === id);
+    if (idx === -1) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const deleted = tasks.splice(idx, 1)[0];
+
+    const writeResult = safeWrite(TASKS_PATH, tasks);
+    if (!writeResult.ok) {
+      return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, deleted: deleted.id });
+  } catch (error) {
+    console.error("[tasks API] DELETE error:", error);
+    return NextResponse.json({ error: "Failed to delete task" }, { status: 500 });
+  }
+}
