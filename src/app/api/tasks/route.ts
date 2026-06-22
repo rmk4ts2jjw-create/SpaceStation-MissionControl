@@ -13,12 +13,14 @@ const AGENTS = ["monkey", "lion", "owl", "fox"] as const;
  * Find the least-burdened agent by counting active in_progress tasks.
  * Falls back to round-robin if counts are equal.
  */
-function findLeastBurdenedAgent(tasks: Task[], now: string): string {
+function findLeastBurdenedAgent(tasks: Task[], now: string, excludeTaskId?: string): string {
   const counts: Record<string, number> = {};
   for (const agent of AGENTS) {
     counts[agent] = 0;
   }
   for (const t of tasks) {
+    // Exclude the task currently being updated (not yet assigned)
+    if (excludeTaskId && t.id === excludeTaskId) continue;
     if (t.status === "in_progress" && t.assignee && AGENTS.includes(t.assignee as typeof AGENTS[number])) {
       counts[t.assignee] = (counts[t.assignee] || 0) + 1;
     }
@@ -156,9 +158,9 @@ export async function PATCH(request: NextRequest) {
       task.lastActivity = now;
 
       // Auto-assign agent when moving to in_progress with no assignee
-      const autoAssignedAgent = status === "in_progress" && !task.assignee;
+      const autoAssignedAgent = status === "in_progress" && (!task.assignee || task.assignee === "");
       if (autoAssignedAgent) {
-        const agent = findLeastBurdenedAgent(tasks, now);
+        const agent = findLeastBurdenedAgent(tasks, now, id);
         task.assignee = agent;
         console.log(`[LoadBalancer] Auto-assigned ${task.id} to ${agent}`);
       }
