@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
+  closestCenter,
   closestCorners,
   KeyboardSensor,
   PointerSensor,
@@ -34,7 +35,6 @@ import {
   AlertOctagon,
   RotateCcw,
   Archive,
-  Trash2,
   Activity,
   FileText,
   X,
@@ -134,19 +134,15 @@ function TaskCard({
   task,
   expanded,
   onToggle,
-  onArchive,
   onQuickAction,
   onOpenDrawer,
-  onRestore,
   isOverlay,
 }: {
   task: Task;
   expanded: boolean;
   onToggle: () => void;
-  onArchive: (id: string) => void;
   onQuickAction: (taskId: string, action: string) => void;
   onOpenDrawer: (id: string) => void;
-  onRestore: (id: string) => void;
   isOverlay?: boolean;
 }) {
   // ── Defensive guard ──
@@ -404,27 +400,7 @@ function TaskCard({
               </button>
             </>
           )}
-          {task.status === "archived" ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); onRestore(task.id); }}
-              title="Restore to backlog"
-              style={{ padding: "4px 8px", borderRadius: "6px", border: "none", backgroundColor: "transparent", color: "rgba(34,197,94,0.6)", cursor: "pointer", fontSize: "10px", fontWeight: 500, fontFamily: "'SF Mono', 'Fira Code', monospace", transition: "all 150ms ease" }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "#22c55e"; e.currentTarget.style.backgroundColor = "rgba(34,197,94,0.08)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(34,197,94,0.6)"; e.currentTarget.style.backgroundColor = "transparent"; }}
-            >
-              Restore
-            </button>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); onArchive(task.id); }}
-              title="Archive task"
-              style={{ padding: "4px 8px", borderRadius: "6px", border: "none", backgroundColor: "transparent", color: "rgba(255,255,255,0.25)", cursor: "pointer", fontSize: "10px", fontWeight: 500, fontFamily: "'SF Mono', 'Fira Code', monospace", transition: "all 150ms ease" }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "#f59e0b"; e.currentTarget.style.backgroundColor = "rgba(251,191,36,0.08)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.25)"; e.currentTarget.style.backgroundColor = "transparent"; }}
-            >
-              Archive
-            </button>
-          )}
+
         </div>
       </div>
 
@@ -471,38 +447,15 @@ function TaskCard({
   );
 }
 
-// ── Detail Drawer ──────────────────────────────────────────────────────────
+// ── Detail Drawer (read-only) ──────────────────────────────────────────────
 
 function DetailDrawer({
   task,
   onClose,
-  onSave,
-  onRefresh,
 }: {
   task: Task;
   onClose: () => void;
-  onSave: (updated: { title: string; note: string; assignee: string }) => void;
-  onRefresh: () => void;
 }) {
-  const [editTitle, setEditTitle] = useState(task.title);
-  const [editNote, setEditNote] = useState(task.note || "");
-  const [editAssignee, setEditAssignee] = useState(task.assignee);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await onSave({ title: editTitle, note: editNote, assignee: editAssignee });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
-      console.error("[DetailDrawer] Save failed:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <>
       {/* Backdrop */}
@@ -575,77 +528,57 @@ function DetailDrawer({
           {/* Title field */}
           <div style={{ marginBottom: "20px" }}>
             <label style={{ display: "block", fontSize: "10px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Title</label>
-            <input
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                border: "1px solid rgba(255,255,255,0.08)",
-                backgroundColor: "rgba(255,255,255,0.03)",
-                color: "rgba(255,255,255,0.9)",
-                fontSize: "13px",
-                fontWeight: 500,
-                outline: "none",
-                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-                transition: "border-color 150ms ease",
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
-            />
+            <div style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              backgroundColor: "rgba(255,255,255,0.03)",
+              color: "rgba(255,255,255,0.9)",
+              fontSize: "13px",
+              fontWeight: 500,
+              lineHeight: "1.4",
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+            }}>
+              {task.title}
+            </div>
           </div>
 
           {/* Description field */}
           <div style={{ marginBottom: "20px" }}>
             <label style={{ display: "block", fontSize: "10px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Description</label>
-            <textarea
-              value={editNote}
-              onChange={(e) => setEditNote(e.target.value)}
-              rows={4}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                border: "1px solid rgba(255,255,255,0.08)",
-                backgroundColor: "rgba(255,255,255,0.03)",
-                color: "rgba(255,255,255,0.8)",
-                fontSize: "12px",
-                lineHeight: "1.6",
-                outline: "none",
-                resize: "vertical",
-                fontFamily: "'SF Mono', 'Fira Code', monospace",
-                transition: "border-color 150ms ease",
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
-            />
+            <div style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              backgroundColor: "rgba(255,255,255,0.03)",
+              color: "rgba(255,255,255,0.8)",
+              fontSize: "12px",
+              lineHeight: "1.6",
+              fontFamily: "'SF Mono', 'Fira Code', monospace",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}>
+              {task.note || "No description"}
+            </div>
           </div>
 
           {/* Assignee field */}
           <div style={{ marginBottom: "20px" }}>
             <label style={{ display: "block", fontSize: "10px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Assignee</label>
-            <select
-              value={editAssignee}
-              onChange={(e) => setEditAssignee(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                border: "1px solid rgba(255,255,255,0.08)",
-                backgroundColor: "rgba(255,255,255,0.03)",
-                color: "rgba(255,255,255,0.8)",
-                fontSize: "12px",
-                outline: "none",
-                cursor: "pointer",
-                fontFamily: "'SF Pro Display', -apple-system, sans-serif",
-              }}
-            >
-              <option value="monkey" style={{ backgroundColor: "#111" }}>🐒 Space Monkey</option>
-              <option value="lifesupport" style={{ backgroundColor: "#111" }}>🥷🏽 Life Support</option>
-              <option value="engineer" style={{ backgroundColor: "#111" }}>🔧 Engineer</option>
-              <option value="archivist" style={{ backgroundColor: "#111" }}>📚 Archivist</option>
-            </select>
+            <div style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              backgroundColor: "rgba(255,255,255,0.03)",
+              color: "rgba(255,255,255,0.8)",
+              fontSize: "12px",
+              fontFamily: "'SF Pro Display', -apple-system, sans-serif",
+            }}>
+              {ASSIGNEE_EMOJI[task.assignee] || "🤖"} {task.assignee}
+            </div>
           </div>
 
           {/* Metadata read-only */}
@@ -697,87 +630,30 @@ function DetailDrawer({
           )}
         </div>
 
-        {/* Footer with Save + Delete */}
+        {/* Footer with close button */}
         <div style={{
           padding: "16px 24px",
           borderTop: "1px solid rgba(255,255,255,0.04)",
           display: "flex",
           alignItems: "center",
           justifyContent: "flex-end",
-          gap: "8px",
           flexShrink: 0,
         }}>
-          {/* Delete button — left side, red ghost */}
-          <button
-            onClick={() => {
-              if (window.confirm("Delete this task? This cannot be undone.")) {
-                fetch(`/api/tasks?id=${task.id}`, { method: "DELETE" })
-                  .then((res) => {
-                    if (res.ok) {
-                      onClose();
-                      onRefresh();
-                    } else {
-                      alert("Failed to delete task");
-                    }
-                  })
-                  .catch((err) => {
-                    console.error("[Delete] Error:", err);
-                    alert("Failed to delete task");
-                  });
-              }
-            }}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: "transparent",
-              color: "rgba(239,68,68,0.5)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              marginRight: "auto",
-              transition: "all 150ms ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)"; e.currentTarget.style.color = "#ef4444"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(239,68,68,0.5)"; }}
-          >
-            Delete
-          </button>
-
-          {saved && (
-            <span style={{ fontSize: "11px", color: "#22c55e", fontWeight: 500 }}>✓ Saved</span>
-          )}
           <button
             onClick={onClose}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "1px solid rgba(255,255,255,0.08)",
-              backgroundColor: "transparent",
-              color: "rgba(255,255,255,0.5)",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
             style={{
               padding: "8px 20px",
               borderRadius: "8px",
               border: "none",
-              backgroundColor: saving ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.12)",
-              color: saving ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.9)",
+              backgroundColor: "rgba(255,255,255,0.12)",
+              color: "rgba(255,255,255,0.9)",
               fontSize: "12px",
               fontWeight: 600,
-              cursor: saving ? "wait" : "pointer",
+              cursor: "pointer",
               transition: "all 150ms ease",
             }}
           >
-            {saving ? "Saving…" : "Save Changes"}
+            Close
           </button>
         </div>
       </div>
@@ -792,10 +668,8 @@ function KanbanColumn({
   tasks,
   expandedId,
   onToggle,
-  onArchive,
   onQuickAction,
   onOpenDrawer,
-  onRestore,
   groupByProject,
   visibleCount,
   onLoadMore,
@@ -804,10 +678,8 @@ function KanbanColumn({
   tasks: Task[];
   expandedId: string | null;
   onToggle: (id: string) => void;
-  onArchive: (id: string) => void;
   onQuickAction: (taskId: string, action: string) => void;
   onOpenDrawer: (id: string) => void;
-  onRestore: (id: string) => void;
   groupByProject: boolean;
   visibleCount: number;
   onLoadMore: () => void;
@@ -913,13 +785,13 @@ function KanbanColumn({
                       📁 {project} ({projectTasks.length})
                     </div>
                     {projectTasks.map((task) => (
-                      <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onArchive={onArchive} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} onRestore={onRestore} />
+                      <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} />
                     ))}
                   </div>
                 ));
               })()
             : tasks.slice(0, visibleCount).map((task) => (
-                <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onArchive={onArchive} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} onRestore={onRestore} />
+                <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} />
               ))
           }
         </SortableContext>
@@ -951,7 +823,6 @@ export default function TasksPage() {
     triage: PAGE_SIZE, backlog: PAGE_SIZE, in_progress: PAGE_SIZE, done: PAGE_SIZE, archived: PAGE_SIZE,
   });
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -1069,25 +940,6 @@ export default function TasksPage() {
     });
   }
 
-  // ── Archive handler ───────────────────────────────────────────────────────
-
-  const handleArchive = useCallback(async (taskId: string) => {
-    // Optimistic update
-    setTasks((prev) => prev.map((t) => t && t.id === taskId ? { ...t, status: "ARCHIVED" } : t));
-    setArchiveConfirm(null);
-
-    try {
-      await fetch("/api/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: taskId, action: "archive" }),
-      });
-    } catch (err) {
-      console.error("[Archive] Failed:", err);
-      fetchTasks();
-    }
-  }, []);
-
   // ── Quick Action handler ─────────────────────────────────────────────────
 
   const handleQuickAction = useCallback(async (taskId: string, action: string) => {
@@ -1142,30 +994,6 @@ export default function TasksPage() {
     }
   }, [tasks, fetchTasks]);
 
-  // ── Detail Drawer save ────────────────────────────────────────────────────
-
-  const handleDrawerSave = useCallback(async (updates: { title: string; note: string; assignee: string }) => {
-    if (!drawerTaskId) return;
-    const res = await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: drawerTaskId, ...updates }),
-    });
-    if (!res.ok) throw new Error("Save failed");
-    await fetchTasks();
-  }, [drawerTaskId, fetchTasks]);
-
-  // ── Restore from archive ─────────────────────────────────────────────────
-
-  const handleRestore = useCallback(async (taskId: string) => {
-    await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: taskId, status: "backlog" }),
-    });
-    await fetchTasks();
-  }, [fetchTasks]);
-
   // ── Summary counts ────────────────────────────────────────────────────────
 
   const p1Count = tasks.filter((t) => t.priority === "P1").length;
@@ -1199,6 +1027,13 @@ export default function TasksPage() {
           <h1 className="text-2xl md:text-3xl font-bold mb-1" style={{ fontFamily: "var(--font-heading)", color: "var(--text-primary)", letterSpacing: "-1.5px" }}>
             🎯 Task Board
           </h1>
+          {/* Workboard Banner */}
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", marginBottom: "12px", borderRadius: "8px", backgroundColor: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+            <span style={{ fontSize: "13px", color: "rgba(99,102,241,0.9)" }}>Tasks are managed via the OpenClaw Workboard.</span>
+            <a href="http://localhost:18789" target="_blank" rel="noopener noreferrer" style={{ padding: "4px 12px", borderRadius: "6px", backgroundColor: "rgba(99,102,241,0.15)", color: "rgba(99,102,241,1)", fontSize: "12px", fontWeight: 600, textDecoration: "none", border: "1px solid rgba(99,102,241,0.25)", transition: "all 150ms ease" }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(99,102,241,0.25)"; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(99,102,241,0.15)"; }}>
+              Open Workboard →
+            </a>
+          </div>
           <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
             {tasks.length} total · {p1Count} P1 · {p2Count} P2 · {p3Count} P3
             {(stalledCount > 0 || ghostCount > 0 || staleCount > 0) && (
@@ -1312,10 +1147,8 @@ export default function TasksPage() {
               tasks={columnTasks[col.key] || []}
               expandedId={expandedId}
               onToggle={(id) => setExpandedId((prev) => (prev === id ? null : id))}
-              onArchive={(id) => setArchiveConfirm(id)}
               onQuickAction={handleQuickAction}
               onOpenDrawer={(id) => setDrawerTaskId(id)}
-              onRestore={handleRestore}
               groupByProject={groupByProject}
               visibleCount={visibleCounts[col.key] || PAGE_SIZE}
               onLoadMore={() => setVisibleCounts((prev) => ({ ...prev, [col.key]: (prev[col.key] || PAGE_SIZE) + PAGE_SIZE }))}
@@ -1326,7 +1159,7 @@ export default function TasksPage() {
 
       {/* Drag overlay */}
       <DragOverlay>
-        {activeTask ? <TaskCard task={activeTask} expanded={false} onToggle={() => {}} onArchive={() => {}} onQuickAction={() => {}} onOpenDrawer={() => {}} onRestore={() => {}} isOverlay /> : null}
+        {activeTask ? <TaskCard task={activeTask} expanded={false} onToggle={() => {}} onQuickAction={() => {}} onOpenDrawer={() => {}} isOverlay /> : null}
       </DragOverlay>
 
       {/* Detail Drawer */}
@@ -1337,30 +1170,9 @@ export default function TasksPage() {
           <DetailDrawer
             task={drawerTask}
             onClose={() => setDrawerTaskId(null)}
-            onSave={handleDrawerSave}
-            onRefresh={fetchTasks}
           />
         );
       })()}
-
-      {/* Archive confirmation modal */}
-      {archiveConfirm && (
-        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)", borderRadius: "12px", padding: "24px", maxWidth: "400px", width: "90%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-              <Archive style={{ width: "20px", height: "20px", color: "#f59e0b" }} />
-              <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)" }}>Archive Task</h3>
-            </div>
-            <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "20px" }}>
-              This task will be moved to the archive and removed from the active board. It won't be deleted — you can find it by filtering for archived tasks.
-            </p>
-            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-              <button onClick={() => setArchiveConfirm(null)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid var(--border)", backgroundColor: "transparent", color: "var(--text-secondary)", fontSize: "13px", cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => handleArchive(archiveConfirm)} style={{ padding: "8px 16px", borderRadius: "6px", border: "none", backgroundColor: "#f59e0b", color: "#000", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Archive</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Animation keyframes */}
       <style>{`
