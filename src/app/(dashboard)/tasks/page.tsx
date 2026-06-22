@@ -52,6 +52,7 @@ interface Task {
   note?: string;
   linkedIncidentId?: string;
   tags?: string[];
+  projectId?: string;
   history?: Array<{
     ts: string;
     action: string;
@@ -303,7 +304,7 @@ function TaskCard({
         {task.title}
       </div>
 
-      {/* Bottom row: Priority + assignee + linked incident */}
+      {/* Bottom row: Priority + project + assignee + linked incident */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
         <span style={{
           display: "inline-flex",
@@ -320,6 +321,19 @@ function TaskCard({
         }}>
           {prio.label}
         </span>
+        {task.projectId && (
+          <span style={{
+            fontSize: "8px",
+            color: "rgba(99,102,241,0.7)",
+            backgroundColor: "rgba(99,102,241,0.06)",
+            padding: "1px 5px",
+            borderRadius: "3px",
+            fontFamily: "'SF Mono', 'Fira Code', monospace",
+            border: "1px solid rgba(99,102,241,0.15)",
+          }}>
+            📁 {task.projectId}
+          </span>
+        )}
         {dispatchBadge}
         {task.linkedIncidentId && (
           <span style={{
@@ -874,9 +888,35 @@ function KanbanColumn({
           </div>
         )}
         <SortableContext items={tasks.slice(0, visibleCount).map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          {tasks.slice(0, visibleCount).map((task) => (
-            <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onArchive={onArchive} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} onRestore={onRestore} />
-          ))}
+          {groupByProject
+            ? (() => {
+                const grouped: Record<string, typeof tasks> = {};
+                for (const task of tasks.slice(0, visibleCount)) {
+                  const key = task.projectId || "No Project";
+                  if (!grouped[key]) grouped[key] = [];
+                  grouped[key].push(task);
+                }
+                return Object.entries(grouped).map(([project, projectTasks]) => (
+                  <div key={project}>
+                    <div style={{
+                      fontSize: "9px", fontWeight: 700, color: "rgba(99,102,241,0.5)",
+                      fontFamily: "'SF Mono', monospace", letterSpacing: "0.5px",
+                      padding: "4px 8px", margin: "8px 0 4px",
+                      backgroundColor: "rgba(99,102,241,0.04)",
+                      borderRadius: "4px", border: "1px solid rgba(99,102,241,0.08)",
+                    }}>
+                      📁 {project} ({projectTasks.length})
+                    </div>
+                    {projectTasks.map((task) => (
+                      <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onArchive={onArchive} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} onRestore={onRestore} />
+                    ))}
+                  </div>
+                ));
+              })()
+            : tasks.slice(0, visibleCount).map((task) => (
+                <TaskCard key={task.id} task={task} expanded={expandedId === task.id} onToggle={() => onToggle(task.id)} onArchive={onArchive} onQuickAction={onQuickAction} onOpenDrawer={onOpenDrawer} onRestore={onRestore} />
+              ))
+          }
         </SortableContext>
         {visibleCount < tasks.length && (
           <button onClick={(e) => { e.stopPropagation(); onLoadMore(); }} style={{ width: "100%", padding: "8px", marginTop: "8px", borderRadius: "6px", border: "1px dashed var(--border)", backgroundColor: "transparent", color: "var(--text-muted)", fontSize: "11px", fontWeight: 600, cursor: "pointer", transition: "all 150ms ease" }}>
@@ -899,6 +939,8 @@ export default function TasksPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterAssignee, setFilterAssignee] = useState<string>("all");
+  const [filterProject, setFilterProject] = useState<string>("all");
+  const [groupByProject, setGroupByProject] = useState<boolean>(false);
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({
     triage: PAGE_SIZE, backlog: PAGE_SIZE, in_progress: PAGE_SIZE, done: PAGE_SIZE, archived: PAGE_SIZE,
   });
@@ -933,9 +975,10 @@ export default function TasksPage() {
 
   useEffect(() => {
     setVisibleCounts({ triage: PAGE_SIZE, backlog: PAGE_SIZE, in_progress: PAGE_SIZE, done: PAGE_SIZE, archived: PAGE_SIZE });
-  }, [filterPriority, filterAssignee]);
+  }, [filterPriority, filterAssignee, filterProject]);
 
   const assignees = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))];
+  const projects = [...new Set(tasks.map((t) => t.projectId).filter(Boolean))];
   const filtered = tasks.filter((t) => {
     if (!t) {
       console.warn("[Tasks] Filter: null/undefined task entry skipped");
@@ -947,6 +990,7 @@ export default function TasksPage() {
     }
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterAssignee !== "all" && t.assignee !== filterAssignee) return false;
+    if (filterProject !== "all" && t.projectId !== filterProject) return false;
     return true;
   });
 
@@ -1173,6 +1217,31 @@ export default function TasksPage() {
             <option value="all">All Assignees</option>
             {assignees.map((a) => (<option key={a} value={a}>{ASSIGNEE_EMOJI[a] || "🤖"} {a}</option>))}
           </select>
+          {projects.length > 0 && (
+            <>
+              <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} style={{ padding: "3px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: 500, backgroundColor: "var(--card-elevated)", border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer" }}>
+                <option value="all">All Projects</option>
+                {projects.map((p) => (<option key={p} value={p}>📁 {p}</option>))}
+              </select>
+              <button
+                onClick={() => setGroupByProject(!groupByProject)}
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: "4px",
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  letterSpacing: "0.3px",
+                  cursor: "pointer",
+                  border: `1px solid ${groupByProject ? "rgba(99,102,241,0.4)" : "var(--border)"}`,
+                  backgroundColor: groupByProject ? "rgba(99,102,241,0.1)" : "transparent",
+                  color: groupByProject ? "rgba(99,102,241,0.9)" : "var(--text-muted)",
+                  transition: "all 150ms ease",
+                }}
+              >
+                {groupByProject ? "📁 Grouped" : "📁 Group by Project"}
+              </button>
+            </>
+          )}
           {error && <span style={{ fontSize: "11px", color: "var(--error)", marginLeft: "auto" }}>⚠ {error}</span>}
         </div>
 

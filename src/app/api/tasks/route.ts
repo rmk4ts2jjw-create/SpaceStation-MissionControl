@@ -23,6 +23,7 @@ export interface Task {
   note?: string;
   linkedIncidentId?: string;
   tags?: string[];
+  projectId?: string;
   history?: Array<{
     ts: string;
     action: string;
@@ -83,7 +84,7 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: "Task not found" }, { status: 404 });
       }
       const now = new Date().toISOString();
-      task.status = "ARCHIVED";
+      task.status = "archived";
       task.lastActivity = now;
       if (!task.history) task.history = [];
       task.history.push({
@@ -101,7 +102,7 @@ export async function PATCH(request: NextRequest) {
 
     // Status update (for drag-and-drop)
     if (id && status) {
-      const validStatuses = ["triage", "backlog", "in_progress", "done", "ARCHIVED"];
+      const validStatuses = ["triage", "backlog", "in_progress", "done", "archived"];
       if (!validStatuses.includes(status)) {
         return NextResponse.json(
           { error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` },
@@ -150,7 +151,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Field updates (for Detail Drawer: title, note, assignee)
-    if (id && (body.title !== undefined || body.note !== undefined || body.assignee !== undefined)) {
+    if (id && (body.title !== undefined || body.note !== undefined || body.assignee !== undefined || body.projectId !== undefined)) {
       const filePath = getTasksPath(request);
       const result = safeRead<Task[]>(filePath, []);
       if (!result.ok) {
@@ -176,6 +177,10 @@ export async function PATCH(request: NextRequest) {
       if (body.assignee !== undefined && body.assignee !== task.assignee) {
         changes.push(`assignee: ${task.assignee} → ${body.assignee}`);
         task.assignee = body.assignee;
+      }
+      if (body.projectId !== undefined && body.projectId !== task.projectId) {
+        changes.push(`project: ${task.projectId || "none"} → ${body.projectId}`);
+        task.projectId = body.projectId;
       }
 
       if (changes.length > 0) {
@@ -233,6 +238,7 @@ export async function POST(request: NextRequest) {
       priority: priority || "P3",
       ts: now,
       note: description || "",
+      projectId: body.projectId || undefined,
       lastActivity: now,
       currentStep: null,
       progress: 0,
