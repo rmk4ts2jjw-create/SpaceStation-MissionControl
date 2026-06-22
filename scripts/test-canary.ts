@@ -7,9 +7,14 @@
  * 2. Wait 5 seconds
  * 3. GET /api/tasks to confirm it exists
  * 4. Log the result
+ *
+ * SAFETY: This script uses the PRODUCTION API endpoints but cleans up
+ * after itself. For full isolation, use tasks-test.json via the
+ * CANARY_USE_TEST_FILE env var.
  */
 
 const BASE_URL = "http://localhost:3000";
+const TEST_MODE = true; // Use tasks-test.json via ?test=1
 const AUTH_COOKIE = "mc_auth=development-secret-key-32-chars-long-min";
 
 async function sleep(ms: number) {
@@ -24,7 +29,7 @@ async function main() {
   let postRes: Response;
   let postData: { success: boolean; task?: { id: string; title: string }; error?: string };
   try {
-    postRes = await fetch(`${BASE_URL}/api/tasks`, {
+    postRes = await fetch(`${BASE_URL}/api/tasks${TEST_MODE ? '?test=1' : ''}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Cookie": AUTH_COOKIE },
       body: JSON.stringify({
@@ -61,7 +66,7 @@ async function main() {
   let getRes: Response;
   let getData: { tasks?: Array<{ id: string; title: string }>; error?: string };
   try {
-    getRes = await fetch(`${BASE_URL}/api/tasks`, { headers: { "Cookie": AUTH_COOKIE } });
+    getRes = await fetch(`${BASE_URL}/api/tasks${TEST_MODE ? '?test=1' : ''}`, { headers: { "Cookie": AUTH_COOKIE } });
     getData = await getRes.json();
   } catch (err) {
     console.error("❌ Step 3 FAILED: Could not reach API:", err);
@@ -95,6 +100,22 @@ async function main() {
   console.log(`   GET:      ${getRes.status} OK`);
   console.log(`   Latency:  ~5s (includes 5s wait)`);
   console.log("═══════════════════════════════════════\n");
+
+  // ── Cleanup: Delete the canary test task ──
+  console.log("🧹 Cleanup: Deleting canary test task...");
+  try {
+    const delRes = await fetch(`${BASE_URL}/api/tasks?id=${taskId}${TEST_MODE ? '&test=1' : ''}`, {
+      method: "DELETE",
+      headers: { "Cookie": AUTH_COOKIE },
+    });
+    if (delRes.ok) {
+      console.log(`✅ Cleanup OK — Task ${taskId} deleted\n`);
+    } else {
+      console.warn(`⚠️  Cleanup failed — HTTP ${delRes.status}. Manual cleanup needed: ${taskId}\n`);
+    }
+  } catch (err) {
+    console.warn(`⚠️  Cleanup error: ${err}. Manual cleanup needed: ${taskId}\n`);
+  }
 }
 
 main().catch((err) => {

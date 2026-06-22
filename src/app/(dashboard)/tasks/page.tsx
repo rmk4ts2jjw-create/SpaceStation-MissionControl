@@ -937,7 +937,14 @@ export default function TasksPage() {
 
   const assignees = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))];
   const filtered = tasks.filter((t) => {
-    if (!t || !t.status) return false;
+    if (!t) {
+      console.warn("[Tasks] Filter: null/undefined task entry skipped");
+      return false;
+    }
+    if (!t.status) {
+      console.warn("[Tasks] Filter: task with missing status skipped:", t.id, t.title?.slice(0, 40));
+      return false;
+    }
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterAssignee !== "all" && t.assignee !== filterAssignee) return false;
     return true;

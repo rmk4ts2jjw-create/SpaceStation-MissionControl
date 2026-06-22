@@ -5,6 +5,13 @@ import { OPENCLAW_WORKSPACE } from "@/lib/paths";
 export const dynamic = "force-dynamic";
 
 const TASKS_PATH = `${OPENCLAW_WORKSPACE}/data/tasks.json`;
+const TEST_TASKS_PATH = `${OPENCLAW_WORKSPACE}/data/tasks-test.json`;
+
+function getTasksPath(request: NextRequest): string {
+  // Use test file if CANARY_USE_TEST_FILE env var is set OR if request has ?test=1
+  const useTest = process.env.CANARY_USE_TEST_FILE === "true" || request.nextUrl.searchParams.get("test") === "1";
+  return useTest ? TEST_TASKS_PATH : TASKS_PATH;
+}
 
 export interface Task {
   id: string;
@@ -35,11 +42,12 @@ export interface Task {
 
 // ── GET ─────────────────────────────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const result = safeRead<Task[]>(TASKS_PATH, []);
+    const filePath = getTasksPath(request);
+    const result = safeRead<Task[]>(filePath, []);
     if (!result.ok) {
-      console.error("[tasks API] Error reading tasks.json:", result.error);
+      console.error("[tasks API] Error reading tasks file:", result.error);
       return NextResponse.json(
         { tasks: [], total: 0, error: "Failed to load tasks" },
         { status: 500 }
@@ -64,7 +72,8 @@ export async function PATCH(request: NextRequest) {
 
     // Archive action: move task to ARCHIVED status
     if (action === "archive" && id) {
-      const result = safeRead<Task[]>(TASKS_PATH, []);
+      const filePath = getTasksPath(request);
+      const result = safeRead<Task[]>(filePath, []);
       if (!result.ok) {
         return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
       }
@@ -83,7 +92,7 @@ export async function PATCH(request: NextRequest) {
         actor: "user",
         details: `Task archived from ${task.status}`,
       });
-      const writeResult = safeWrite(TASKS_PATH, tasks);
+      const writeResult = safeWrite(filePath, tasks);
       if (!writeResult.ok) {
         return NextResponse.json({ error: "Failed to save" }, { status: 500 });
       }
@@ -100,7 +109,8 @@ export async function PATCH(request: NextRequest) {
         );
       }
 
-      const result = safeRead<Task[]>(TASKS_PATH, []);
+      const filePath = getTasksPath(request);
+      const result = safeRead<Task[]>(filePath, []);
       if (!result.ok) {
         return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
       }
@@ -131,7 +141,7 @@ export async function PATCH(request: NextRequest) {
         details: `Status changed from ${oldStatus} to ${status} (drag-and-drop)`,
       });
 
-      const writeResult = safeWrite(TASKS_PATH, tasks);
+      const writeResult = safeWrite(filePath, tasks);
       if (!writeResult.ok) {
         return NextResponse.json({ error: "Failed to save" }, { status: 500 });
       }
@@ -141,7 +151,8 @@ export async function PATCH(request: NextRequest) {
 
     // Field updates (for Detail Drawer: title, note, assignee)
     if (id && (body.title !== undefined || body.note !== undefined || body.assignee !== undefined)) {
-      const result = safeRead<Task[]>(TASKS_PATH, []);
+      const filePath = getTasksPath(request);
+      const result = safeRead<Task[]>(filePath, []);
       if (!result.ok) {
         return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
       }
@@ -177,7 +188,7 @@ export async function PATCH(request: NextRequest) {
           details: changes.join(", "),
         });
 
-        const writeResult = safeWrite(TASKS_PATH, tasks);
+        const writeResult = safeWrite(filePath, tasks);
         if (!writeResult.ok) {
           return NextResponse.json({ error: "Failed to save" }, { status: 500 });
         }
@@ -204,7 +215,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
     }
 
-    const result = safeRead<Task[]>(TASKS_PATH, []);
+    const filePath = getTasksPath(request);
+    const result = safeRead<Task[]>(filePath, []);
     if (!result.ok) {
       return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
     }
@@ -236,7 +248,7 @@ export async function POST(request: NextRequest) {
 
     tasks.push(newTask);
 
-    const writeResult = safeWrite(TASKS_PATH, tasks);
+    const writeResult = safeWrite(filePath, tasks);
     if (!writeResult.ok) {
       return NextResponse.json({ error: "Failed to save" }, { status: 500 });
     }
@@ -259,7 +271,8 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Task ID required" }, { status: 400 });
     }
 
-    const result = safeRead<Task[]>(TASKS_PATH, []);
+    const filePath = getTasksPath(request);
+    const result = safeRead<Task[]>(filePath, []);
     if (!result.ok) {
       return NextResponse.json({ error: "Failed to read tasks" }, { status: 500 });
     }
@@ -271,7 +284,7 @@ export async function DELETE(request: NextRequest) {
 
     const deleted = tasks.splice(idx, 1)[0];
 
-    const writeResult = safeWrite(TASKS_PATH, tasks);
+    const writeResult = safeWrite(filePath, tasks);
     if (!writeResult.ok) {
       return NextResponse.json({ error: "Failed to save" }, { status: 500 });
     }
