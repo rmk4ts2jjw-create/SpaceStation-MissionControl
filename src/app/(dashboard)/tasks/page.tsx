@@ -793,6 +793,7 @@ function KanbanColumn({
   onQuickAction,
   onOpenDrawer,
   onRestore,
+  groupByProject,
   visibleCount,
   onLoadMore,
 }: {
@@ -804,6 +805,7 @@ function KanbanColumn({
   onQuickAction: (taskId: string, action: string) => void;
   onOpenDrawer: (id: string) => void;
   onRestore: (id: string) => void;
+  groupByProject: boolean;
   visibleCount: number;
   onLoadMore: () => void;
 }) {
@@ -1258,6 +1260,7 @@ export default function TasksPage() {
               onQuickAction={handleQuickAction}
               onOpenDrawer={(id) => setDrawerTaskId(id)}
               onRestore={handleRestore}
+              groupByProject={groupByProject}
               visibleCount={visibleCounts[col.key] || PAGE_SIZE}
               onLoadMore={() => setVisibleCounts((prev) => ({ ...prev, [col.key]: (prev[col.key] || PAGE_SIZE) + PAGE_SIZE }))}
             />
