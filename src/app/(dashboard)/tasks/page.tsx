@@ -5,7 +5,6 @@ import {
   DndContext,
   DragOverlay,
   closestCenter,
-  closestCorners,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -29,8 +28,6 @@ import {
   ListFilter,
   ChevronDown,
   ChevronRight,
-  Tag,
-  User,
   Zap,
   AlertOctagon,
   RotateCcw,
@@ -38,7 +35,13 @@ import {
   Activity,
   FileText,
   X,
+  Plus,
+  Send,
+  Loader2,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
+import { useWorkboard, type WorkboardCard } from "@/hooks/useWorkboard";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -70,19 +73,31 @@ interface Task {
   rcaConfidence?: number;
 }
 
-interface TasksResponse {
-  tasks: Task[];
-  total: number;
-  error?: string;
-}
-
 const COLUMNS = [
   { key: "triage", label: "Triage", icon: AlertTriangle, accent: "var(--warning)" },
   { key: "backlog", label: "Backlog", icon: CircleDot, accent: "var(--text-muted)" },
+  { key: "scheduled", label: "Scheduled", icon: Clock, accent: "var(--info)" },
+  { key: "ready", label: "Ready", icon: CheckCircle2, accent: "var(--success)" },
   { key: "in_progress", label: "In Progress", icon: Zap, accent: "var(--accent)" },
+  { key: "review", label: "Review", icon: Activity, accent: "var(--warning)" },
+  { key: "blocked", label: "Blocked", icon: AlertOctagon, accent: "var(--error)" },
   { key: "done", label: "Done", icon: CheckCircle2, accent: "var(--success)" },
   { key: "archived", label: "Archive", icon: Archive, accent: "rgba(100,100,100,0.4)" },
 ] as const;
+
+const WORKBOARD_STATUS_TO_COLUMN: Record<string, string> = {
+  running: "in_progress",
+};
+
+const COLUMN_TO_WORKBOARD_STATUS: Record<string, string> = {
+  in_progress: "running",
+};
+
+const WORKBOARD_PRIORITY_TO_SS: Record<string, string> = {
+  urgent: "P1",
+  high: "P2",
+  normal: "P3",
+};
 
 const PRIORITY_CONFIG: Record<string, { bg: string; text: string; border: string; label: string }> = {
   P1: { bg: "rgba(239, 68, 68, 0.10)", text: "#ef4444", border: "rgba(239, 68, 68, 0.35)", label: "P1" },
@@ -96,6 +111,40 @@ const ASSIGNEE_EMOJI: Record<string, string> = {
   engineer: "🔧",
   archivist: "📚",
 };
+
+// ── Field Mappers ───────────────────────────────────────────────────────────
+
+function wbCardToTask(card: WorkboardCard): Task {
+  const status = WORKBOARD_STATUS_TO_COLUMN[card.status] || card.status;
+  const priority = WORKBOARD_PRIORITY_TO_SS[card.priority] || card.priority || "P3";
+  return {
+    id: card.id,
+    title: card.title,
+    assignee: card.assignee || "",
+    status,
+    priority,
+    ts: card.createdAt || new Date().toISOString(),
+    note: card.description || "",
+    tags: card.tags || [],
+    projectId: card.projectId,
+    lastActivity: card.updatedAt || card.createdAt,
+    currentStep: null,
+    progress: 0,
+    stalledAt: null,
+    wasStalled: false,
+    dispatchCount: 0,
+    dispatchFailed: false,
+    dispatchFailedReason: "",
+    rcaConfidence: 0,
+    history: [],
+  };
+}
+
+function ssStatusToWbStatus(status: string): string {
+  return COLUMN_TO_WORKBOARD_STATUS[status] || status;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function timeAgo(ts: string): string {
   if (!ts || ts === "just now") return "just now";
@@ -125,7 +174,7 @@ function computeStalenessMin(task: Task): number {
 function isActive(task: Task): boolean {
   if (!task.lastActivity) return false;
   const diff = Date.now() - new Date(task.lastActivity).getTime();
-  return diff < 5 * 60 * 1000; // 5 minutes
+  return diff < 5 * 60 * 1000;
 }
 
 // ── TaskCard ────────────────────────────────────────────────────────────────
@@ -133,7 +182,6 @@ function isActive(task: Task): boolean {
 function TaskCard({
   task,
   expanded,
-  onToggle,
   onQuickAction,
   onOpenDrawer,
   isOverlay,
@@ -145,13 +193,6 @@ function TaskCard({
   onOpenDrawer: (id: string) => void;
   isOverlay?: boolean;
 }) {
-  // ── Defensive guard ──
-  if (!task || !task.status) {
-    console.warn("[TaskCard] Skipping render for invalid task:", task);
-    return null;
-  }
-
-  // ── Sortable hook ──
   const {
     attributes,
     listeners,
@@ -160,6 +201,11 @@ function TaskCard({
     transition,
     isDragging,
   } = useSortable({ id: task.id });
+
+  if (!task || !task.status) {
+    console.warn("[TaskCard] Skipping render for invalid task:", task);
+    return null;
+  }
 
   const sortableStyle: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -250,9 +296,7 @@ function TaskCard({
       {...attributes}
       {...listeners}
     >
-      {/* Top row: Drag handle + timestamp (top-right, muted) */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-        {/* Drag handle grip */}
         <div
           style={{
             display: "flex",
@@ -270,8 +314,6 @@ function TaskCard({
           <span style={{ display: "flex", gap: "2px" }}><span style={{ width: "3px", height: "3px", borderRadius: "50%", backgroundColor: "currentColor" }} /><span style={{ width: "3px", height: "3px", borderRadius: "50%", backgroundColor: "currentColor" }} /></span>
           <span style={{ display: "flex", gap: "2px" }}><span style={{ width: "3px", height: "3px", borderRadius: "50%", backgroundColor: "currentColor" }} /><span style={{ width: "3px", height: "3px", borderRadius: "50%", backgroundColor: "currentColor" }} /></span>
         </div>
-
-        {/* Timestamp — top-right, small, muted */}
         <span style={{
           fontSize: "9px",
           color: "rgba(255,255,255,0.25)",
@@ -284,7 +326,6 @@ function TaskCard({
         </span>
       </div>
 
-      {/* Title — clickable for expand */}
       <div
         onClick={(e) => { e.stopPropagation(); onOpenDrawer(task.id); }}
         style={{
@@ -300,7 +341,6 @@ function TaskCard({
         {task.title}
       </div>
 
-      {/* Bottom row: Priority + project + assignee + linked incident */}
       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
         <span style={{
           display: "inline-flex",
@@ -354,10 +394,8 @@ function TaskCard({
         </div>
       </div>
 
-      {/* Stall indicator */}
       {stallIndicator}
 
-      {/* Footer: time + linked incident + actions */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
         <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono, monospace)", display: "flex", alignItems: "center", gap: "3px" }}>
           <Clock style={{ width: "10px", height: "10px" }} />
@@ -400,11 +438,9 @@ function TaskCard({
               </button>
             </>
           )}
-
         </div>
       </div>
 
-      {/* Expanded detail */}
       {expanded && (
         <div style={{ marginTop: "10px" }}>
           {task.note && (
@@ -412,7 +448,6 @@ function TaskCard({
               {task.note.slice(0, 500)}{task.note.length > 500 && "…"}
             </div>
           )}
-          {/* History log */}
           {task.history && task.history.length > 0 && (
             <div style={{ padding: "8px", backgroundColor: "rgba(0,0,0,0.15)", borderRadius: "6px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "6px" }}>
@@ -435,7 +470,6 @@ function TaskCard({
         </div>
       )}
 
-      {/* Expand indicator */}
       <div style={{ textAlign: "center", marginTop: "4px" }}>
         {expanded ? (
           <ChevronDown style={{ width: "14px", height: "14px", color: "var(--text-muted)", margin: "0 auto" }} />
@@ -447,7 +481,7 @@ function TaskCard({
   );
 }
 
-// ── Detail Drawer (read-only) ──────────────────────────────────────────────
+// ── Detail Drawer ───────────────────────────────────────────────────────────
 
 function DetailDrawer({
   task,
@@ -458,7 +492,6 @@ function DetailDrawer({
 }) {
   return (
     <>
-      {/* Backdrop */}
       <div
         onClick={onClose}
         style={{
@@ -470,8 +503,6 @@ function DetailDrawer({
           animation: "fadeIn 150ms ease",
         }}
       />
-
-      {/* Centered glass modal */}
       <div
         style={{
           position: "fixed",
@@ -494,7 +525,6 @@ function DetailDrawer({
           overflow: "hidden",
         }}
       >
-        {/* Header */}
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -522,10 +552,7 @@ function DetailDrawer({
           </button>
         </div>
 
-        {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
-
-          {/* Title field */}
           <div style={{ marginBottom: "20px" }}>
             <label style={{ display: "block", fontSize: "10px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Title</label>
             <div style={{
@@ -544,7 +571,6 @@ function DetailDrawer({
             </div>
           </div>
 
-          {/* Description field */}
           <div style={{ marginBottom: "20px" }}>
             <label style={{ display: "block", fontSize: "10px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Description</label>
             <div style={{
@@ -564,7 +590,6 @@ function DetailDrawer({
             </div>
           </div>
 
-          {/* Assignee field */}
           <div style={{ marginBottom: "20px" }}>
             <label style={{ display: "block", fontSize: "10px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>Assignee</label>
             <div style={{
@@ -581,7 +606,6 @@ function DetailDrawer({
             </div>
           </div>
 
-          {/* Metadata read-only */}
           <div style={{ marginBottom: "20px", padding: "12px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
               <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.25)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.3px" }}>Status</span>
@@ -597,7 +621,6 @@ function DetailDrawer({
             </div>
           </div>
 
-          {/* Activity Log — READ ONLY */}
           {task.history && task.history.length > 0 && (
             <div style={{ marginBottom: "20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "10px" }}>
@@ -630,7 +653,6 @@ function DetailDrawer({
           )}
         </div>
 
-        {/* Footer with close button */}
         <div style={{
           padding: "16px 24px",
           borderTop: "1px solid rgba(255,255,255,0.04)",
@@ -691,7 +713,6 @@ function KanbanColumn({
     (t.currentStep === null || t.currentStep === "Agent starting…" || t.currentStep === "Agent starting..." || computeStalenessMin(t) > 30)
   ).length;
 
-  // ── Droppable column zone ──
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({ id: column.key });
 
   return (
@@ -810,6 +831,7 @@ function KanbanColumn({
 const PAGE_SIZE = 10;
 
 export default function TasksPage() {
+  const { call, connected, error: wbError } = useWorkboard();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -819,39 +841,56 @@ export default function TasksPage() {
   const [filterProject, setFilterProject] = useState<string>("all");
   const [groupByProject, setGroupByProject] = useState<boolean>(false);
   const [systemFilter, setSystemFilter] = useState<'all' | 'stalled' | 'ghost'>('all');
-  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({
-    triage: PAGE_SIZE, backlog: PAGE_SIZE, in_progress: PAGE_SIZE, done: PAGE_SIZE, archived: PAGE_SIZE,
-  });
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>(
+    Object.fromEntries(COLUMNS.map((c) => [c.key, PAGE_SIZE]))
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  const [showNewCard, setShowNewCard] = useState(false);
+  const [newCardTitle, setNewCardTitle] = useState("");
+  const [newCardPriority, setNewCardPriority] = useState<string>("normal");
+  const [dispatching, setDispatching] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const fetchTasks = useCallback(async () => {
+  const fetchCards = useCallback(async () => {
     try {
-      const res = await fetch("/api/tasks");
-      const data: TasksResponse = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        const raw: Task[] = data.tasks || [];
-        const valid = raw.filter((t): t is Task => !!t && typeof t === "object" && !!t.status);
-        if (valid.length !== raw.length) {
-          console.warn(`[Tasks] Filtered ${raw.length - valid.length} invalid entries from API response`);
-        }
-        console.log("[Tasks] Rendering:", valid.length, "tasks");
-        setTasks(valid);
+      setError(null);
+      const result = await call("workboard.cards.list", {}) as { cards: WorkboardCard[] };
+      const cards = result.cards || [];
+      const valid = cards.filter((c): c is WorkboardCard => !!c && typeof c === "object" && !!c.id);
+      if (valid.length !== cards.length) {
+        console.warn(`[Tasks] Filtered ${cards.length - valid.length} invalid entries from Workboard response`);
       }
-    } catch (err) { setError("Failed to fetch tasks"); console.error(err); } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { fetchTasks(); const interval = setInterval(fetchTasks, 30000); return () => clearInterval(interval); }, [fetchTasks]);
+      const mapped = valid.map(wbCardToTask);
+      console.log("[Tasks] Loaded", mapped.length, "cards from Workboard");
+      setTasks(mapped);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to fetch cards";
+      setError(msg);
+      console.error("[Tasks] fetchCards error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [call]);
 
   useEffect(() => {
-    setVisibleCounts({ triage: PAGE_SIZE, backlog: PAGE_SIZE, in_progress: PAGE_SIZE, done: PAGE_SIZE, archived: PAGE_SIZE });
+    if (connected) {
+      setLoading(true);
+      fetchCards();
+      const interval = setInterval(fetchCards, 30000);
+      return () => clearInterval(interval);
+    } else if (wbError) {
+      setLoading(false);
+    }
+  }, [connected, wbError, fetchCards]);
+
+  useEffect(() => {
+    setVisibleCounts(Object.fromEntries(COLUMNS.map((c) => [c.key, PAGE_SIZE])));
   }, [filterPriority, filterAssignee, filterProject]);
 
   const assignees = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))];
@@ -868,7 +907,6 @@ export default function TasksPage() {
     if (filterPriority !== "all" && t.priority !== filterPriority) return false;
     if (filterAssignee !== "all" && t.assignee !== filterAssignee) return false;
     if (filterProject !== "all" && t.projectId !== filterProject) return false;
-    // System-level filters (stalled/ghost)
     if (systemFilter === "stalled" && !t.stalledAt) return false;
     if (systemFilter === "ghost") {
       const isGhost = t.status === "in_progress" && (t.currentStep === null || t.currentStep === "Agent starting…" || t.currentStep === "Agent starting...");
@@ -877,7 +915,6 @@ export default function TasksPage() {
     return true;
   });
 
-  // Build column tasks
   const columnTasks: Record<string, Task[]> = {};
   for (const col of COLUMNS) {
     columnTasks[col.key] = filtered.filter((t) => t && t.status === col.key);
@@ -890,7 +927,7 @@ export default function TasksPage() {
     setActiveId(event.active.id as string);
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  async function handleDragEnd(event: DragEndEvent) {
     console.log("[DnD] DragEnd:", event);
     setActiveId(null);
     const { active, over } = event;
@@ -901,24 +938,20 @@ export default function TasksPage() {
 
     const taskId = active.id as string;
     const overId = over.id as string;
-
-    // Find the task being dragged
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
 
-    // Determine target column
     let targetStatus: string | null = null;
-
-    // Check if dropped on a column
     if (COLUMNS.some((c) => c.key === overId)) {
       targetStatus = overId;
     } else {
-      // Dropped on another task — find that task's column
       const overTask = tasks.find((t) => t.id === overId);
       if (overTask) targetStatus = overTask.status;
     }
 
     if (!targetStatus || targetStatus === task.status) return;
+
+    const previousStatus = task.status;
 
     // Optimistic update
     setTasks((prev) =>
@@ -929,15 +962,21 @@ export default function TasksPage() {
       )
     );
 
-    // Persist via API
-    fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: taskId, status: targetStatus }),
-    }).catch((err) => {
-      console.error("[DnD] Failed to persist status change:", err);
-      fetchTasks(); // Revert on failure
-    });
+    // Persist via Workboard API
+    try {
+      await call("workboard.cards.move", {
+        cardId: taskId,
+        targetStatus: ssStatusToWbStatus(targetStatus!),
+      });
+    } catch (err) {
+      console.error("[DnD] Failed to move card via Workboard:", err);
+      // Revert optimistic update
+      setTasks((prev) =>
+        prev.map((t) =>
+          t && t.id === taskId ? { ...t, status: previousStatus } : t
+        )
+      );
+    }
   }
 
   // ── Quick Action handler ─────────────────────────────────────────────────
@@ -949,7 +988,6 @@ export default function TasksPage() {
     const incidentId = task.linkedIncidentId;
 
     try {
-      // Map action to incident API action
       let incidentAction: string;
       let taskStatus: string | null = null;
 
@@ -958,15 +996,13 @@ export default function TasksPage() {
         taskStatus = "done";
       } else if (action === "ignore") {
         incidentAction = "acknowledge";
-        // Task stays in current status, just acknowledge the incident
       } else if (action === "escalate") {
         incidentAction = "escalate";
-        // Task stays in current status, just escalate the incident
       } else {
         return;
       }
 
-      // Update incident via API
+      // Update incident via Workboard (or API — keep as-is since incidents may be separate)
       const incRes = await fetch("/api/incidents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -978,21 +1014,56 @@ export default function TasksPage() {
         return;
       }
 
-      // If resolving, also mark the task as done
+      // If resolving, also move the card to done
       if (taskStatus) {
-        await fetch("/api/tasks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: taskId, status: taskStatus }),
+        await call("workboard.cards.move", {
+          cardId: taskId,
+          targetStatus: ssStatusToWbStatus(taskStatus),
         });
       }
 
-      // Refresh tasks
-      fetchTasks();
+      fetchCards();
     } catch (err) {
       console.error("[QuickAction] Error:", err);
     }
-  }, [tasks, fetchTasks]);
+  }, [tasks, call, fetchCards]);
+
+  // ── New Card ─────────────────────────────────────────────────────────────
+
+  async function handleCreateCard() {
+    if (!newCardTitle.trim()) return;
+    setCreating(true);
+    try {
+      await call("workboard.cards.create", {
+        title: newCardTitle.trim(),
+        description: "",
+        priority: newCardPriority,
+        status: "backlog",
+      });
+      setNewCardTitle("");
+      setNewCardPriority("normal");
+      setShowNewCard(false);
+      fetchCards();
+    } catch (err) {
+      console.error("[NewCard] Failed to create card:", err);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // ── Dispatch Ready Work ──────────────────────────────────────────────────
+
+  async function handleDispatch() {
+    setDispatching(true);
+    try {
+      await call("workboard.cards.dispatch", {});
+      fetchCards();
+    } catch (err) {
+      console.error("[Dispatch] Failed to dispatch:", err);
+    } finally {
+      setDispatching(false);
+    }
+  }
 
   // ── Summary counts ────────────────────────────────────────────────────────
 
@@ -1005,13 +1076,31 @@ export default function TasksPage() {
 
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) : null;
 
-  if (loading) {
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  if (!connected && loading) {
     return (
       <div style={{ padding: "24px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "400px" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px" }}>
-            <div style={{ width: "32px", height: "32px", border: "2px solid var(--accent)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-            <span style={{ color: "var(--text-secondary)", fontSize: "14px" }}>Loading tasks…</span>
+            <Loader2 style={{ width: "32px", height: "32px", color: "var(--accent)", animation: "spin 1s linear infinite" }} />
+            <span style={{ color: "var(--text-secondary)", fontSize: "14px" }}>Connecting to Workboard…</span>
+          </div>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (!connected && wbError) {
+    return (
+      <div style={{ padding: "24px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "400px" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", padding: "32px", borderRadius: "12px", backgroundColor: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <WifiOff style={{ width: "28px", height: "28px", color: "#ef4444" }} />
+            <span style={{ color: "#ef4444", fontSize: "14px", fontWeight: 600 }}>Workboard Connection Error</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "12px", textAlign: "center" }}>{wbError}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: "11px", textAlign: "center" }}>Ensure the Gateway is running at ws://localhost:18789 and a gatewayToken is set in localStorage</span>
           </div>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -1024,16 +1113,163 @@ export default function TasksPage() {
       <div className="p-4 md:p-8">
         {/* Page Header */}
         <div style={{ marginBottom: "20px" }}>
-          <h1 className="text-2xl md:text-3xl font-bold mb-1" style={{ fontFamily: "var(--font-heading)", color: "var(--text-primary)", letterSpacing: "-1.5px" }}>
-            🎯 Task Board
-          </h1>
-          {/* Workboard Banner */}
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", marginBottom: "12px", borderRadius: "8px", backgroundColor: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
-            <span style={{ fontSize: "13px", color: "rgba(99,102,241,0.9)" }}>Tasks are managed via the OpenClaw Workboard.</span>
-            <a href="http://localhost:18789" target="_blank" rel="noopener noreferrer" style={{ padding: "4px 12px", borderRadius: "6px", backgroundColor: "rgba(99,102,241,0.15)", color: "rgba(99,102,241,1)", fontSize: "12px", fontWeight: 600, textDecoration: "none", border: "1px solid rgba(99,102,241,0.25)", transition: "all 150ms ease" }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(99,102,241,0.25)"; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(99,102,241,0.15)"; }}>
-              Open Workboard →
-            </a>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <h1 className="text-2xl md:text-3xl font-bold" style={{ fontFamily: "var(--font-heading)", color: "var(--text-primary)", letterSpacing: "-1.5px" }}>
+                🎯 Task Board
+              </h1>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: "2px 8px", borderRadius: "12px",
+                fontSize: "10px", fontWeight: 600,
+                backgroundColor: connected ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+                color: connected ? "#22c55e" : "#ef4444",
+              }}>
+                {connected ? <Wifi style={{ width: "10px", height: "10px" }} /> : <WifiOff style={{ width: "10px", height: "10px" }} />}
+                {connected ? "Workboard" : "Disconnected"}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => setShowNewCard(true)}
+                title="Create a new card"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "6px",
+                  padding: "8px 16px", borderRadius: "8px",
+                  border: "1px solid rgba(99,102,241,0.3)",
+                  backgroundColor: "rgba(99,102,241,0.1)",
+                  color: "rgba(99,102,241,0.9)",
+                  fontSize: "12px", fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 150ms ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(99,102,241,0.2)"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "rgba(99,102,241,0.1)"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.3)"; }}
+              >
+                <Plus style={{ width: "14px", height: "14px" }} />
+                New Card
+              </button>
+              <button
+                onClick={handleDispatch}
+                disabled={dispatching}
+                title="Dispatch ready work items"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "6px",
+                  padding: "8px 16px", borderRadius: "8px",
+                  border: "1px solid rgba(251,191,36,0.3)",
+                  backgroundColor: "rgba(251,191,36,0.1)",
+                  color: "rgba(251,191,36,0.9)",
+                  fontSize: "12px", fontWeight: 600,
+                  cursor: dispatching ? "wait" : "pointer",
+                  opacity: dispatching ? 0.6 : 1,
+                  transition: "all 150ms ease",
+                }}
+                onMouseEnter={(e) => { if (!dispatching) { e.currentTarget.style.backgroundColor = "rgba(251,191,36,0.2)"; e.currentTarget.style.borderColor = "rgba(251,191,36,0.5)"; } }}
+                onMouseLeave={(e) => { if (!dispatching) { e.currentTarget.style.backgroundColor = "rgba(251,191,36,0.1)"; e.currentTarget.style.borderColor = "rgba(251,191,36,0.3)"; } }}
+              >
+                {dispatching ? (
+                  <Loader2 style={{ width: "14px", height: "14px", animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <Send style={{ width: "14px", height: "14px" }} />
+                )}
+                {dispatching ? "Dispatching…" : "Dispatch Ready Work"}
+              </button>
+            </div>
           </div>
+
+          {/* New Card Inline Form */}
+          {showNewCard && (
+            <div style={{
+              padding: "16px", marginBottom: "12px",
+              borderRadius: "12px",
+              backgroundColor: "rgba(99,102,241,0.04)",
+              border: "1px solid rgba(99,102,241,0.2)",
+              display: "flex", flexDirection: "column", gap: "10px",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="text"
+                  value={newCardTitle}
+                  onChange={(e) => setNewCardTitle(e.target.value)}
+                  placeholder="Card title…"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateCard(); if (e.key === "Escape") setShowNewCard(false); }}
+                  style={{
+                    flex: 1,
+                    padding: "10px 12px", borderRadius: "8px",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    backgroundColor: "rgba(0,0,0,0.3)",
+                    color: "var(--text-primary)",
+                    fontSize: "13px",
+                    fontFamily: "var(--font-body)",
+                    outline: "none",
+                  }}
+                />
+                <select
+                  value={newCardPriority}
+                  onChange={(e) => setNewCardPriority(e.target.value)}
+                  style={{
+                    padding: "10px 12px", borderRadius: "8px",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    backgroundColor: "rgba(0,0,0,0.3)",
+                    color: "var(--text-secondary)",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    outline: "none",
+                  }}
+                >
+                  <option value="normal">P3</option>
+                  <option value="high">P2</option>
+                  <option value="urgent">P1</option>
+                </select>
+                <button
+                  onClick={handleCreateCard}
+                  disabled={creating || !newCardTitle.trim()}
+                  style={{
+                    padding: "10px 20px", borderRadius: "8px",
+                    border: "none",
+                    backgroundColor: creating ? "rgba(99,102,241,0.3)" : "rgba(99,102,241,0.5)",
+                    color: "#fff",
+                    fontSize: "12px", fontWeight: 600,
+                    cursor: creating ? "wait" : "pointer",
+                    opacity: !newCardTitle.trim() ? 0.5 : 1,
+                    transition: "all 150ms ease",
+                  }}
+                >
+                  {creating ? "Creating…" : "Create"}
+                </button>
+                <button
+                  onClick={() => setShowNewCard(false)}
+                  style={{
+                    padding: "10px", borderRadius: "8px",
+                    border: "none",
+                    backgroundColor: "transparent",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    fontSize: "18px",
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!connected && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", marginBottom: "12px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)" }}>
+              <WifiOff style={{ width: "12px", height: "12px", color: "#ef4444", flexShrink: 0 }} />
+              <span style={{ fontSize: "11px", color: "rgba(239,68,68,0.8)" }}>Workboard Gateway disconnected — reconnecting every 3s. Ensure the Gateway is running at ws://localhost:18789 and a gatewayToken is set in localStorage.</span>
+            </div>
+          )}
+
+          {error && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", marginBottom: "12px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+              <AlertTriangle style={{ width: "12px", height: "12px", color: "#ef4444", flexShrink: 0 }} />
+              <span style={{ fontSize: "11px", color: "#ef4444" }}>{error}</span>
+            </div>
+          )}
+
           <p style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
             {tasks.length} total · {p1Count} P1 · {p2Count} P2 · {p3Count} P3
             {(stalledCount > 0 || ghostCount > 0 || staleCount > 0) && (
@@ -1135,7 +1371,6 @@ export default function TasksPage() {
               </button>
             </>
           )}
-          {error && <span style={{ fontSize: "11px", color: "var(--error)", marginLeft: "auto" }}>⚠ {error}</span>}
         </div>
 
         {/* Kanban Board */}
