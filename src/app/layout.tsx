@@ -19,7 +19,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mission Control - OpenClaw",
+  title: "SpaceStation - OpenClaw",
   description: "Your OpenClaw agent dashboard",
   manifest: "/manifest.json",
   themeColor: "#1a1a2e",
@@ -40,7 +40,6 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
-        <script dangerouslySetInnerHTML={{__html:`if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js")`}} />
       </head>
       <body 
         className={`${inter.variable} ${sora.variable} ${jetbrainsMono.variable} font-sans`}

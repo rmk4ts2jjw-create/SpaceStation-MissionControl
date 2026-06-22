@@ -45,12 +45,15 @@ interface Agent {
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats>({ total: 0, today: 0, success: 0, error: 0, byType: {} });
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [liveCounts, setLiveCounts] = useState({ tasks: 0, incidents: 0, triage: 0 });
 
   useEffect(() => {
     Promise.all([
       fetch("/api/activities/stats").then(r => r.json()),
       fetch("/api/agents").then(r => r.json()),
-    ]).then(([actStats, agentsData]) => {
+      fetch("/api/tasks").then(r => r.json()),
+      fetch("/api/incidents").then(r => r.json()),
+    ]).then(([actStats, agentsData, tasksData, incidentsData]) => {
       setStats({
         total: actStats.total || 0,
         today: actStats.today || 0,
@@ -59,6 +62,13 @@ export default function DashboardPage() {
         byType: actStats.byType || {},
       });
       setAgents(agentsData.agents || []);
+      const tasks = tasksData.tasks || [];
+      const incidents = incidentsData.incidents || [];
+      setLiveCounts({
+        tasks: tasks.filter((t: any) => t.status !== "done").length,
+        incidents: incidents.filter((i: any) => i.status !== "RESOLVED").length,
+        triage: incidents.filter((i: any) => i.status === "TRIAGE").length,
+      });
     }).catch(console.error);
   }, []);
 
@@ -74,10 +84,10 @@ export default function DashboardPage() {
             letterSpacing: '-1.5px'
           }}
         >
-          🦞 Mission Control
+          👽 SpaceStation
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-          Overview of Tenacitas agent activity
+          {liveCounts.tasks} active tasks · {liveCounts.incidents} open incidents · {liveCounts.triage} triage
         </p>
       </div>
 

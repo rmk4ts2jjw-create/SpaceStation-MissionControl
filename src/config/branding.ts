@@ -1,14 +1,14 @@
 /**
  * Branding Configuration
- * 
- * Customize this file to match your instance's branding.
+ *
+ * Customise this file to match your instance's branding.
  * This keeps personal/instance-specific data out of the main codebase.
  */
 
 export const BRANDING = {
   // Main agent name and emoji
-  agentName: process.env.NEXT_PUBLIC_AGENT_NAME || "Mission Control",
-  agentEmoji: process.env.NEXT_PUBLIC_AGENT_EMOJI || "🦞",
+  agentName: process.env.NEXT_PUBLIC_AGENT_NAME || "SpaceStation",
+  agentEmoji: process.env.NEXT_PUBLIC_AGENT_EMOJI || "👽",
 
   // About page — agent identity
   agentLocation: process.env.NEXT_PUBLIC_AGENT_LOCATION || "",
@@ -24,11 +24,11 @@ export const BRANDING = {
   // Social media handles (optional - for workflow descriptions)
   twitterHandle: process.env.NEXT_PUBLIC_TWITTER_HANDLE || "@username",
 
-  // Company/organization name (shown in office 3D view)
-  companyName: process.env.NEXT_PUBLIC_COMPANY_NAME || "MISSION CONTROL, INC.",
+  // Company/organisation name (shown in office 3D view)
+  companyName: process.env.NEXT_PUBLIC_COMPANY_NAME || "SPACE STATION, INC.",
 
   // App title (shown in browser tab)
-  appTitle: process.env.NEXT_PUBLIC_APP_TITLE || "Mission Control",
+  appTitle: process.env.NEXT_PUBLIC_APP_TITLE || "SpaceStation",
 } as const;
 
 // Helper to get full agent display name

@@ -12,25 +12,38 @@ import VoxelMacMini from './VoxelMacMini';
 
 interface AgentDeskProps {
   agent: AgentConfig;
-  state: AgentState;
+  state: AgentState | undefined;
   onClick: () => void;
   isSelected: boolean;
 }
+
+const DEFAULT_STATE: AgentState = {
+  id: '',
+  status: 'idle',
+  currentTask: undefined,
+  model: undefined,
+  tokensPerHour: 0,
+  tasksInQueue: 0,
+  uptime: 0,
+};
 
 export default function AgentDesk({ agent, state, onClick, isSelected }: AgentDeskProps) {
   const deskRef = useRef<Mesh>(null);
   const monitorRef = useRef<Mesh>(null);
   const [hovered, setHovered] = useState(false);
 
+  // Fallback to default state if undefined (e.g. agent not yet loaded from API)
+  const safeState = state ?? { ...DEFAULT_STATE, id: agent.id };
+
   // Animación de pulsación para estado "thinking"
   useFrame((frameState) => {
-    if (monitorRef.current && state.status === 'thinking') {
+    if (monitorRef.current && safeState.status === 'thinking') {
       monitorRef.current.scale.setScalar(1 + Math.sin(frameState.clock.elapsedTime * 2) * 0.05);
     }
   });
 
   const getStatusColor = () => {
-    switch (state.status) {
+    switch (safeState.status) {
       case 'working':
         return '#22c55e'; // green-500
       case 'thinking':
@@ -44,7 +57,7 @@ export default function AgentDesk({ agent, state, onClick, isSelected }: AgentDe
   };
 
   const getMonitorEmissive = () => {
-    switch (state.status) {
+    switch (safeState.status) {
       case 'working':
         return '#15803d'; // darker green
       case 'thinking':
@@ -88,7 +101,7 @@ export default function AgentDesk({ agent, state, onClick, isSelected }: AgentDe
         <meshStandardMaterial
           color={getStatusColor()}
           emissive={getMonitorEmissive()}
-          emissiveIntensity={state.status === 'idle' ? 0.1 : 0.5}
+          emissiveIntensity={safeState.status === 'idle' ? 0.1 : 0.5}
         />
       </Box>
 
@@ -144,8 +157,8 @@ export default function AgentDesk({ agent, state, onClick, isSelected }: AgentDe
         anchorX="center"
         anchorY="middle"
       >
-        {state.status.toUpperCase()}
-        {state.model && ` • ${state.model}`}
+        {safeState.status.toUpperCase()}
+        {safeState.model && ` • ${safeState.model}`}
       </Text>
 
       {/* Desk legs */}

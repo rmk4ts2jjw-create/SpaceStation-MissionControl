@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { OPENCLAW_WORKSPACE } from '@/lib/paths';
 
-const DATA_PATH = path.join(process.cwd(), 'data', 'notifications.json');
+// ── Types ───────────────────────────────────────────────────────────────────
 
 export interface Notification {
   id: string;
@@ -13,6 +13,7 @@ export interface Notification {
   type: 'info' | 'success' | 'warning' | 'error';
   read: boolean;
   link?: string;
+  source?: string;       // 'incident' | 'system'
   metadata?: Record<string, unknown>;
 }
 
@@ -21,24 +22,116 @@ interface NotificationsResponse {
   unreadCount: number;
 }
 
-async function loadNotifications(): Promise<Notification[]> {
+// ── Paths ───────────────────────────────────────────────────────────────────
+
+const LOCAL_DATA_PATH = `${process.cwd()}/data/notifications.json`;
+const INCIDENTS_PATH = `${OPENCLAW_WORKSPACE}/data/incidents.json`;
+
+// ── Incident → Notification mapping ──────────────────────────────────────────
+
+const SEVERITY_TO_TYPE: Record<string, Notification['type']> = {
+  P1: 'error',
+  P2: 'warning',
+  P3: 'warning',
+  P4: 'info',
+};
+
+interface Incident {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  summary: string;
+  opened: string;
+  lastActivity: string;
+  tags?: string[];
+  _recurrence?: number;
+}
+
+function loadIncidents(): Incident[] {
   try {
-    const data = await fs.readFile(DATA_PATH, 'utf-8');
-    return JSON.parse(data);
+    if (!existsSync(INCIDENTS_PATH)) return [];
+    const raw = readFileSync(INCIDENTS_PATH, 'utf-8');
+    return JSON.parse(raw);
   } catch {
     return [];
   }
 }
 
-async function saveNotifications(notifications: Notification[]): Promise<void> {
-  const dir = path.dirname(DATA_PATH);
-  try {
-    await fs.access(dir);
-  } catch {
-    await fs.mkdir(dir, { recursive: true });
-  }
-  await fs.writeFile(DATA_PATH, JSON.stringify(notifications, null, 2));
+function incidentsToNotifications(incidents: Incident[]): Notification[] {
+  const activeStatuses = new Set(['TRIAGE', 'OPEN', 'MITIGATING', 'AWAITING_REVIEW']);
+
+  return incidents
+    .filter((inc) => activeStatuses.has(inc.status))
+    .map((inc) => ({
+      id: `inc-${inc.id}`,
+      timestamp: inc.opened,
+      title: inc.severity ? `[${inc.severity}] ${inc.title}` : inc.title,
+      message: inc.summary || 'No details available.',
+      type: SEVERITY_TO_TYPE[inc.severity] || 'warning',
+      read: false,
+      link: '/incidents',
+      source: 'incident',
+      metadata: {
+        incidentId: inc.id,
+        severity: inc.severity,
+        status: inc.status,
+        tags: inc.tags || [],
+        recurrence: inc._recurrence || 1,
+      },
+    }));
 }
+
+// ── Local notification store (for system notifications + read state) ────────
+
+function loadLocalNotifications(): Notification[] {
+  try {
+    if (!existsSync(LOCAL_DATA_PATH)) return [];
+    const raw = readFileSync(LOCAL_DATA_PATH, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalNotifications(notifications: Notification[]): void {
+  writeFileSync(LOCAL_DATA_PATH, JSON.stringify(notifications, null, 2));
+}
+
+// ── Merge: live incidents override incident-sourced notifications ────────────
+
+function mergeNotifications(
+  local: Notification[],
+  fromIncidents: Notification[]
+): Notification[] {
+  // Build a map of incident-sourced IDs
+  const incidentIds = new Set(fromIncidents.map((n) => n.id));
+
+  // Keep local notifications that are NOT from incidents (system notifications)
+  // and preserve their read state
+  const systemNotifications = local.filter((n) => !incidentIds.has(n.id));
+
+  // For incident notifications: use the live data, but preserve read state
+  // from local store if the user has already read it
+  const localReadMap = new Map(
+    local.filter((n) => incidentIds.has(n.id)).map((n) => [n.id, n.read])
+  );
+
+  const mergedIncidents = fromIncidents.map((n) => ({
+    ...n,
+    read: localReadMap.get(n.id) ?? n.read,
+  }));
+
+  // Combine: incidents first (sorted by timestamp), then system
+  const all = [...mergedIncidents, ...systemNotifications];
+  all.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  return all;
+}
+
+// ── GET ─────────────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
   try {
@@ -46,38 +139,47 @@ export async function GET(request: NextRequest) {
     const onlyUnread = searchParams.get('unread') === 'true';
     const limit = parseInt(searchParams.get('limit') || '50');
 
-    let notifications = await loadNotifications();
+    // Load live incidents and convert to notifications
+    const incidents = loadIncidents();
+    const incidentNotifications = incidentsToNotifications(incidents);
+
+    // Load local store (for system notifications + read state)
+    const local = loadLocalNotifications();
+
+    // Merge: live incidents take precedence for incident-sourced notifications
+    let notifications = mergeNotifications(local, incidentNotifications);
 
     // Filter by read status if requested
     if (onlyUnread) {
       notifications = notifications.filter((n) => !n.read);
     }
 
-    // Sort by timestamp (newest first)
-    notifications.sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
-
     // Apply limit
     notifications = notifications.slice(0, limit);
 
-    const unreadCount = (await loadNotifications()).filter((n) => !n.read).length;
+    // Count unread from the full merged set
+    const allMerged = mergeNotifications(local, incidentNotifications);
+    const unreadCount = allMerged.filter((n) => !n.read).length;
 
     return NextResponse.json<NotificationsResponse>({
       notifications,
       unreadCount,
     });
   } catch (error) {
-    console.error('Failed to get notifications:', error);
-    return NextResponse.json({ error: 'Failed to get notifications' }, { status: 500 });
+    console.error('[notifications] Failed to get notifications:', error);
+    return NextResponse.json(
+      { error: 'Failed to get notifications' },
+      { status: 500 }
+    );
   }
 }
+
+// ── POST (system notifications) ─────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Validate required fields
     if (!body.title || !body.message) {
       return NextResponse.json(
         { error: 'Missing required fields: title, message' },
@@ -85,7 +187,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate type
     const validTypes = ['info', 'success', 'warning', 'error'];
     const type = body.type || 'info';
     if (!validTypes.includes(type)) {
@@ -95,7 +196,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const notifications = await loadNotifications();
+    const local = loadLocalNotifications();
 
     const newNotification: Notification = {
       id: randomUUID(),
@@ -105,58 +206,88 @@ export async function POST(request: NextRequest) {
       type,
       read: false,
       link: body.link,
+      source: 'system',
       metadata: body.metadata,
     };
 
-    // Prepend (newest first)
-    notifications.unshift(newNotification);
+    local.unshift(newNotification);
 
-    // Keep only last 100 notifications
-    if (notifications.length > 100) {
-      notifications.splice(100);
+    // Keep only last 100 system notifications
+    if (local.length > 100) {
+      local.splice(100);
     }
 
-    await saveNotifications(notifications);
+    saveLocalNotifications(local);
 
     return NextResponse.json(newNotification, { status: 201 });
   } catch (error) {
-    console.error('Failed to create notification:', error);
-    return NextResponse.json({ error: 'Failed to create notification' }, { status: 500 });
+    console.error('[notifications] Failed to create notification:', error);
+    return NextResponse.json(
+      { error: 'Failed to create notification' },
+      { status: 500 }
+    );
   }
 }
+
+// ── PATCH (mark read/unread) ────────────────────────────────────────────────
 
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
     const { id, read, action } = body;
 
-    const notifications = await loadNotifications();
+    const local = loadLocalNotifications();
 
     // Mark all as read
     if (action === 'markAllRead') {
-      notifications.forEach((n) => (n.read = true));
-      await saveNotifications(notifications);
-      return NextResponse.json({ success: true, updated: notifications.length });
+      local.forEach((n) => (n.read = true));
+      saveLocalNotifications(local);
+      return NextResponse.json({ success: true, updated: local.length });
     }
 
     // Mark single notification as read/unread
     if (id) {
-      const notification = notifications.find((n) => n.id === id);
+      const notification = local.find((n) => n.id === id);
       if (!notification) {
+        // If not in local store, it might be an incident notification
+        // that hasn't been persisted yet — add it
+        const incidents = loadIncidents();
+        const inc = incidents.find((i) => `inc-${i.id}` === id);
+        if (inc) {
+          const newNotif: Notification = {
+            id: `inc-${inc.id}`,
+            timestamp: inc.opened,
+            title: `[${inc.severity}] ${inc.title}`,
+            message: inc.summary || 'No details available.',
+            type: SEVERITY_TO_TYPE[inc.severity] || 'warning',
+            read: read !== undefined ? read : true,
+            link: '/incidents',
+            source: 'incident',
+            metadata: { incidentId: inc.id, severity: inc.severity, status: inc.status },
+          };
+          local.unshift(newNotif);
+          saveLocalNotifications(local);
+          return NextResponse.json(newNotif);
+        }
         return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
       }
 
       notification.read = read !== undefined ? read : !notification.read;
-      await saveNotifications(notifications);
+      saveLocalNotifications(local);
       return NextResponse.json(notification);
     }
 
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   } catch (error) {
-    console.error('Failed to update notification:', error);
-    return NextResponse.json({ error: 'Failed to update notification' }, { status: 500 });
+    console.error('[notifications] Failed to update notification:', error);
+    return NextResponse.json(
+      { error: 'Failed to update notification' },
+      { status: 500 }
+    );
   }
 }
+
+// ── DELETE ──────────────────────────────────────────────────────────────────
 
 export async function DELETE(request: NextRequest) {
   try {
@@ -164,30 +295,36 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get('id');
     const action = searchParams.get('action');
 
-    const notifications = await loadNotifications();
+    const local = loadLocalNotifications();
 
     // Delete all read notifications
     if (action === 'clearRead') {
-      const updated = notifications.filter((n) => !n.read);
-      await saveNotifications(updated);
-      return NextResponse.json({ success: true, deleted: notifications.length - updated.length });
+      const updated = local.filter((n) => !n.read);
+      saveLocalNotifications(updated);
+      return NextResponse.json({
+        success: true,
+        deleted: local.length - updated.length,
+      });
     }
 
     // Delete single notification
     if (id) {
-      const index = notifications.findIndex((n) => n.id === id);
+      const index = local.findIndex((n) => n.id === id);
       if (index === -1) {
         return NextResponse.json({ error: 'Notification not found' }, { status: 404 });
       }
 
-      notifications.splice(index, 1);
-      await saveNotifications(notifications);
+      local.splice(index, 1);
+      saveLocalNotifications(local);
       return NextResponse.json({ success: true });
     }
 
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   } catch (error) {
-    console.error('Failed to delete notification:', error);
-    return NextResponse.json({ error: 'Failed to delete notification' }, { status: 500 });
+    console.error('[notifications] Failed to delete notification:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete notification' },
+      { status: 500 }
+    );
   }
 }

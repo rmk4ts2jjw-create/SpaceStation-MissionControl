@@ -1,10 +1,11 @@
-import Office3D from '@/components/Office3D/Office3D';
+import { Metadata } from "next";
+import OfficeClient from "./client";
 
-export const metadata = {
-  title: 'The Office 3D | Mission Control',
-  description: 'Visualiza tus agentes trabajando en tiempo real en un entorno 3D',
+export const metadata: Metadata = {
+  title: "The Office 3D | SpaceStation",
+  description: "Visualise your agents working in real-time in a 3D environment",
 };
 
 export default function OfficePage() {
-  return <Office3D />;
+  return <OfficeClient />;
 }

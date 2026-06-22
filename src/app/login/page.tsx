@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Terminal, Lock, AlertCircle } from "lucide-react";
 
 function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,8 +26,7 @@ function LoginForm() {
 
       if (data.success) {
         const from = searchParams.get("from") || "/";
-        router.push(from);
-        router.refresh();
+        window.location.href = from;
       } else {
         setError("Incorrect password");
       }
@@ -54,7 +52,7 @@ function LoginForm() {
             className="w-7 h-7" 
             style={{ color: 'var(--accent)' }} 
           />
-          <span className="text-2xl">🦞</span>
+          <span className="text-2xl">👽</span>
           <h1 
             className="text-xl font-bold"
             style={{ 
@@ -63,7 +61,7 @@ function LoginForm() {
               letterSpacing: '-0.5px'
             }}
           >
-            Mission Control
+            SpaceStation
           </h1>
         </div>
         <p 

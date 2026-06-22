@@ -231,53 +231,81 @@ function loadConfiguredSkills(): ConfiguredSkill[] {
 }
 
 /**
- * Scan only configured skills and return parsed skills
+ * Auto-discover skills by scanning directories
+ */
+function discoverSkillsInDir(dirPath: string, source: 'workspace' | 'system', agentSkillMap: Map<string, string[]>): SkillInfo[] {
+  const found: SkillInfo[] = [];
+  if (!fs.existsSync(dirPath)) return found;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const skillPath = path.join(dirPath, entry.name);
+      const agents = agentSkillMap.get(entry.name) || [];
+      const skill = parseSkill(skillPath, entry.name, agents);
+      if (skill) {
+        skill.source = source;
+        found.push(skill);
+      }
+    }
+  } catch (err) {
+    console.error(`Error discovering skills in ${dirPath}:`, err);
+  }
+  return found;
+}
+
+/**
+ * Scan configured skills AND auto-discover workspace + system skills
  */
 export function scanAllSkills(): SkillInfo[] {
   const skills: SkillInfo[] = [];
+  const seen = new Set<string>();
   
   try {
-    const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
-    const config: SkillsConfig = JSON.parse(content);
-    
-    const systemPath = config.systemSkillsPath || DEFAULT_SYSTEM_PATH;
-    const workspacePath = config.workspaceSkillsPath || DEFAULT_WORKSPACE_PATH;
+    const openclawDir = process.env.OPENCLAW_DIR || '/root/.openclaw';
+    const systemPath = DEFAULT_SYSTEM_PATH;
+    const workspaceSkillsDir = path.join(openclawDir, 'workspace', 'skills');
+    const workspaceInfraSkillsDir = path.join(openclawDir, 'workspace-infra', 'skills');
 
-    // Build agent->skills map for workspace skills
+    // Build agent->skills map
     const agentSkillMap = buildAgentSkillMap();
-    
-    for (const { name, location } of config.skills) {
-      let skillPath: string;
-      
-      // Resolve path based on location type
-      if (location === 'system') {
-        skillPath = path.join(systemPath, name);
-      } else if (location === 'workspace') {
-        skillPath = path.join(workspacePath, name);
-      } else {
-        // Full path provided
-        skillPath = location;
-      }
-      
-      if (!fs.existsSync(skillPath)) {
-        console.warn(`Skill not found: ${name} at ${skillPath}`);
-        continue;
-      }
 
-      // Determine which agents have this skill
-      const agents = agentSkillMap.get(name) || [];
-      
-      const skill = parseSkill(skillPath, name, agents);
-      if (skill) {
-        skills.push(skill);
-      }
+    // 1. Auto-discover workspace skills from ~/.openclaw/workspace/skills/
+    for (const s of discoverSkillsInDir(workspaceSkillsDir, 'workspace', agentSkillMap)) {
+      if (!seen.has(s.id)) { skills.push(s); seen.add(s.id); }
     }
+
+    // 2. Auto-discover workspace-infra skills
+    for (const s of discoverSkillsInDir(workspaceInfraSkillsDir, 'workspace', agentSkillMap)) {
+      if (!seen.has(s.id)) { skills.push(s); seen.add(s.id); }
+    }
+
+    // 3. Auto-discover system skills
+    for (const s of discoverSkillsInDir(systemPath, 'system', agentSkillMap)) {
+      if (!seen.has(s.id)) { skills.push(s); seen.add(s.id); }
+    }
+
+    // 4. Also load any configured skills from JSON (for custom paths)
+    try {
+      const content = fs.readFileSync(CONFIG_PATH, 'utf-8');
+      const config: SkillsConfig = JSON.parse(content);
+      for (const { name, location } of (config.skills || [])) {
+        if (seen.has(name)) continue;
+        let skillPath: string;
+        if (location === 'system') skillPath = path.join(systemPath, name);
+        else if (location === 'workspace') skillPath = path.join(workspaceInfraSkillsDir, name);
+        else skillPath = location;
+        if (fs.existsSync(skillPath)) {
+          const agents = agentSkillMap.get(name) || [];
+          const skill = parseSkill(skillPath, name, agents);
+          if (skill) { skills.push(skill); seen.add(name); }
+        }
+      }
+    } catch {}
     
     // Sort by source (workspace first), then name
     skills.sort((a, b) => {
-      if (a.source !== b.source) {
-        return a.source === 'workspace' ? -1 : 1;
-      }
+      if (a.source !== b.source) return a.source === 'workspace' ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
     

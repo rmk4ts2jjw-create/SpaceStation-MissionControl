@@ -19,20 +19,34 @@ import WallClock from './WallClock';
 import FirstPersonControls from './FirstPersonControls';
 import MovingAvatar from './MovingAvatar';
 
+const DEFAULT_STATE: AgentState = {
+  id: '',
+  status: 'idle',
+  currentTask: undefined,
+  model: undefined,
+  tokensPerHour: 0,
+  tasksInQueue: 0,
+  uptime: 0,
+};
+
+function getAgentState(agentId: string, agentStates: Record<string, AgentState>): AgentState {
+  return agentStates[agentId] ?? { ...DEFAULT_STATE, id: agentId };
+}
+
 export default function Office3D() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [interactionModal, setInteractionModal] = useState<string | null>(null);
   const [controlMode, setControlMode] = useState<'orbit' | 'fps'>('orbit');
   const [avatarPositions, setAvatarPositions] = useState<Map<string, any>>(new Map());
   
-  // Mock data - TODO: Replace with real API data
+  // Agent states keyed by the same IDs used in AGENTS array
   const [agentStates] = useState<Record<string, AgentState>>({
-    main: { id: 'main', status: 'working', currentTask: 'Procesando emails', model: 'opus', tokensPerHour: 15000, tasksInQueue: 3, uptime: 12 },
-    academic: { id: 'academic', status: 'idle', model: 'sonnet', tokensPerHour: 0, tasksInQueue: 0, uptime: 8 },
-    studio: { id: 'studio', status: 'thinking', currentTask: 'Generando guión YouTube', model: 'opus', tokensPerHour: 8000, tasksInQueue: 1, uptime: 5 },
-    linkedin: { id: 'linkedin', status: 'working', currentTask: 'Redactando post', model: 'sonnet', tokensPerHour: 5000, tasksInQueue: 2, uptime: 10 },
-    social: { id: 'social', status: 'idle', model: 'sonnet', tokensPerHour: 0, tasksInQueue: 0, uptime: 7 },
-    infra: { id: 'infra', status: 'error', currentTask: 'Failed deployment', model: 'haiku', tokensPerHour: 1000, tasksInQueue: 0, uptime: 15 },
+    main: { id: 'main', status: 'working', currentTask: 'Processing emails', model: 'opus', tokensPerHour: 15000, tasksInQueue: 3, uptime: 12 },
+    'agent-2': { id: 'agent-2', status: 'idle', model: 'sonnet', tokensPerHour: 0, tasksInQueue: 0, uptime: 8 },
+    'agent-3': { id: 'agent-3', status: 'thinking', currentTask: 'Generating content', model: 'opus', tokensPerHour: 8000, tasksInQueue: 1, uptime: 5 },
+    'agent-4': { id: 'agent-4', status: 'working', currentTask: 'Writing post', model: 'sonnet', tokensPerHour: 5000, tasksInQueue: 2, uptime: 10 },
+    'agent-5': { id: 'agent-5', status: 'idle', model: 'sonnet', tokensPerHour: 0, tasksInQueue: 0, uptime: 7 },
+    'agent-6': { id: 'agent-6', status: 'error', currentTask: 'Failed deployment', model: 'haiku', tokensPerHour: 1000, tasksInQueue: 0, uptime: 15 },
   });
 
   const handleDeskClick = (agentId: string) => {
@@ -110,12 +124,12 @@ export default function Office3D() {
           {/* Paredes */}
           <Walls />
 
-          {/* Escritorios de agentes (sin avatares) */}
+          {/* Agent desks (without avatars) */}
           {AGENTS.map((agent) => (
             <AgentDesk
               key={agent.id}
               agent={agent}
-              state={agentStates[agent.id]}
+              state={getAgentState(agent.id, agentStates)}
               onClick={() => handleDeskClick(agent.id)}
               isSelected={selectedAgent === agent.id}
             />
@@ -126,7 +140,7 @@ export default function Office3D() {
             <MovingAvatar
               key={`avatar-${agent.id}`}
               agent={agent}
-              state={agentStates[agent.id]}
+              state={getAgentState(agent.id, agentStates)}
               officeBounds={{ minX: -8, maxX: 8, minZ: -7, maxZ: 7 }}
               obstacles={obstacles}
               otherAvatarPositions={avatarPositions}
@@ -174,11 +188,11 @@ export default function Office3D() {
         </Suspense>
       </Canvas>
 
-      {/* Panel lateral cuando se selecciona un agente */}
+      {/* Side panel when an agent is selected */}
       {selectedAgent && (
         <AgentPanel
           agent={AGENTS.find(a => a.id === selectedAgent)!}
-          state={agentStates[selectedAgent]}
+          state={getAgentState(selectedAgent, agentStates)}
           onClose={handleClosePanel}
         />
       )}
@@ -226,7 +240,7 @@ export default function Office3D() {
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <span className="text-green-400">✓</span>
-                        <span>Phase 0: TenacitOS Shell</span>
+                        <span>Phase 0: SpaceStation Shell</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <span className="text-yellow-400">●</span>

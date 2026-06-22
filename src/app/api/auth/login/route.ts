@@ -93,10 +93,11 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({ success: true });
 
     // Set auth cookie (7 days expiry)
-    // secure=true in production (HTTPS), false in dev (HTTP localhost)
+    // secure=false because we're behind an HTTP proxy (nginx on Docker host)
+    // The proxy terminates HTTPS at the network level; browser→proxy is HTTP
     response.cookies.set("mc_auth", process.env.AUTH_SECRET!, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: false,
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 7, // 7 days
       path: "/",

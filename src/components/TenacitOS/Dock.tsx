@@ -15,10 +15,14 @@ import {
   DollarSign,
   Settings,
   History,
+  Target,
+  AlertOctagon,
 } from "lucide-react";
 
 const dockItems = [
   { href: "/", label: "Dashboard", icon: Home },
+  { href: "/tasks", label: "Tasks", icon: Target },
+  { href: "/incidents", label: "Incidents", icon: AlertOctagon },
   { href: "/system", label: "System Monitor", icon: Monitor },
   { href: "/files", label: "Files", icon: FolderOpen },
   { href: "/memory", label: "Memory", icon: Brain },
