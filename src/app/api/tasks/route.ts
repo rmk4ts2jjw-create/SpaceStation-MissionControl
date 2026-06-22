@@ -7,6 +7,35 @@ export const dynamic = "force-dynamic";
 const TASKS_PATH = `${OPENCLAW_WORKSPACE}/data/tasks.json`;
 const TEST_TASKS_PATH = `${OPENCLAW_WORKSPACE}/data/tasks-test.json`;
 
+const AGENTS = ["monkey", "lion", "owl", "fox"] as const;
+
+/**
+ * Find the least-burdened agent by counting active in_progress tasks.
+ * Falls back to round-robin if counts are equal.
+ */
+function findLeastBurdenedAgent(tasks: Task[], now: string): string {
+  const counts: Record<string, number> = {};
+  for (const agent of AGENTS) {
+    counts[agent] = 0;
+  }
+  for (const t of tasks) {
+    if (t.status === "in_progress" && t.assignee && AGENTS.includes(t.assignee as typeof AGENTS[number])) {
+      counts[t.assignee] = (counts[t.assignee] || 0) + 1;
+    }
+  }
+  // Find minimum count, with round-robin fallback (first in array wins ties)
+  let minAgent = AGENTS[0];
+  let minCount = counts[minAgent];
+  for (const agent of AGENTS) {
+    if (counts[agent] < minCount) {
+      minCount = counts[agent];
+      minAgent = agent;
+    }
+  }
+  console.log(`[LoadBalancer] Agent counts: ${JSON.stringify(counts)} → assigned: ${minAgent}`);
+  return minAgent;
+}
+
 function getTasksPath(request: NextRequest): string {
   // Use test file if CANARY_USE_TEST_FILE env var is set OR if request has ?test=1
   const useTest = process.env.CANARY_USE_TEST_FILE === "true" || request.nextUrl.searchParams.get("test") === "1";
@@ -126,6 +155,14 @@ export async function PATCH(request: NextRequest) {
       task.status = status;
       task.lastActivity = now;
 
+      // Auto-assign agent when moving to in_progress with no assignee
+      const autoAssignedAgent = status === "in_progress" && !task.assignee;
+      if (autoAssignedAgent) {
+        const agent = findLeastBurdenedAgent(tasks, now);
+        task.assignee = agent;
+        console.log(`[LoadBalancer] Auto-assigned ${task.id} to ${agent}`);
+      }
+
       // Clear stall-related fields when moving out of in_progress
       if (status !== "in_progress") {
         task.currentStep = null;
@@ -135,11 +172,14 @@ export async function PATCH(request: NextRequest) {
 
       // Add history entry
       if (!task.history) task.history = [];
+      const historyDetails = autoAssignedAgent
+        ? `Status changed from ${oldStatus} to ${status} (drag-and-drop). Auto-assigned to ${task.assignee} via Load Balancer.`
+        : `Status changed from ${oldStatus} to ${status} (drag-and-drop)`;
       task.history.push({
         ts: now,
         action: "status_change",
-        actor: "user",
-        details: `Status changed from ${oldStatus} to ${status} (drag-and-drop)`,
+        actor: "system",
+        details: historyDetails,
       });
 
       const writeResult = safeWrite(filePath, tasks);
@@ -233,7 +273,7 @@ export async function POST(request: NextRequest) {
     const newTask: Task = {
       id,
       title,
-      assignee: assignee || "monkey",
+      assignee: assignee || "",
       status: status || "backlog",
       priority: priority || "P3",
       ts: now,
