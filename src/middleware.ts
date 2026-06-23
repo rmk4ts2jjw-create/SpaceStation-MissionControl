@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+function getClientIP(request: NextRequest): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  const xri = request.headers.get("x-real-ip");
+  if (xri) return xri.trim();
+  return request.ip ?? "";
+}
+
+function isLocalIP(ip: string): boolean {
+  if (ip === "127.0.0.1" || ip === "::1" || ip === "localhost") return true;
+  if (ip.startsWith("192.168.68.")) return true;
+  return false;
+}
+
 // Routes that never require authentication
 const PUBLIC_ROUTES = new Set(["/login"]);
 
@@ -22,6 +36,11 @@ export function middleware(request: NextRequest) {
 
   // Always allow public API routes (auth + health)
   if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+    return NextResponse.next();
+  }
+
+  // Bypass auth for local network
+  if (isLocalIP(getClientIP(request))) {
     return NextResponse.next();
   }
 
