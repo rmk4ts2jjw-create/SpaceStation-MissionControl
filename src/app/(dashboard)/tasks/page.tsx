@@ -70,12 +70,6 @@ interface Task {
   rcaConfidence?: number;
 }
 
-interface TasksResponse {
-  tasks: Task[];
-  total: number;
-  error?: string;
-}
-
 const COLUMNS = [
   { key: "triage", label: "Triage", icon: AlertTriangle, accent: "var(--warning)" },
   { key: "backlog", label: "Backlog", icon: CircleDot, accent: "var(--text-muted)" },
@@ -832,12 +826,33 @@ export default function TasksPage() {
 
   const fetchTasks = useCallback(async () => {
     try {
-      const res = await fetch("/api/tasks");
-      const data: TasksResponse = await res.json();
+      const res = await fetch("/api/workboard/cards");
+      const data = await res.json();
       if (data.error) {
         setError(data.error);
       } else {
-        const raw: Task[] = data.tasks || [];
+        // Map Workboard cards to local Task interface
+        const raw: Task[] = (data.cards || []).map((card: Record<string, unknown>) => ({
+          id: String(card.id || ""),
+          title: String(card.title || ""),
+          assignee: String(card.assignee || ""),
+          status: String(card.status || "backlog"),
+          priority: String(card.priority || "P3"),
+          ts: String(card.createdAt || new Date().toISOString()),
+          note: String(card.description || ""),
+          tags: Array.isArray(card.tags) ? card.tags.map(String) : [],
+          projectId: String(card.projectId || ""),
+          lastActivity: String(card.updatedAt || card.createdAt || ""),
+          currentStep: null,
+          progress: 0,
+          stalledAt: null,
+          wasStalled: false,
+          dispatchCount: 0,
+          dispatchFailed: false,
+          dispatchFailedReason: "",
+          rcaConfidence: 0,
+          history: [],
+        }));
         const valid = raw.filter((t): t is Task => !!t && typeof t === "object" && !!t.status);
         if (valid.length !== raw.length) {
           console.warn(`[Tasks] Filtered ${raw.length - valid.length} invalid entries from API response`);
@@ -929,8 +944,8 @@ export default function TasksPage() {
       )
     );
 
-    // Persist via API
-    fetch("/api/tasks", {
+    // Persist via Workboard API
+    fetch("/api/workboard/cards", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: taskId, status: targetStatus }),
@@ -978,9 +993,9 @@ export default function TasksPage() {
         return;
       }
 
-      // If resolving, also mark the task as done
+      // If resolving, also mark the task as done via Workboard
       if (taskStatus) {
-        await fetch("/api/tasks", {
+        await fetch("/api/workboard/cards", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: taskId, status: taskStatus }),

@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 const PUBLIC_ROUTES = new Set(["/login"]);
 
 // API routes that are always public (auth endpoints + health check)
-const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/health"];
+const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/health", "/api/workboard"];
 
 function isAuthenticated(request: NextRequest): boolean {
   const authCookie = request.cookies.get("mc_auth");
