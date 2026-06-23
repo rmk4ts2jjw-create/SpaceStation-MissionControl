@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 // ── Server-side Workboard client ───────────────────────────────────────────
 // This route proxies browser requests to the OpenClaw Workboard via Gateway
 // WebSocket. The browser never connects to the Gateway directly.
 
 const GATEWAY_URL = process.env.GATEWAY_URL || "ws://localhost:18789";
-const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || "";
 const WORKBOARD_BOARD_ID = process.env.WORKBOARD_BOARD_ID || "main";
+
+function getGatewayToken(): string {
+  // 1. Check env var first
+  if (process.env.GATEWAY_TOKEN) return process.env.GATEWAY_TOKEN;
+  // 2. Read from gateway config
+  try {
+    const configPath = path.join(os.homedir(), ".openclaw/openclaw.json");
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    return config?.gateway?.auth?.token || "";
+  } catch {
+    return "";
+  }
+}
+
+const GATEWAY_TOKEN = getGatewayToken();
 
 // ── WebSocket RPC helper ────────────────────────────────────────────────────
 interface RPCResult {
@@ -21,13 +38,20 @@ function gatewayRPC(
   token: string,
 ): Promise<RPCResult> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(GATEWAY_URL);
+    const ws = new WebSocket(GATEWAY_URL, {
+      headers: {
+        Origin: process.env.GATEWAY_ORIGIN || "http://localhost:18789",
+      },
+    });
     const timeout = setTimeout(() => {
       ws.close();
       reject(new Error(`RPC call "${method}" timed out after 15s`));
     }, 15000);
 
+    let connected = false;
+
     ws.onopen = () => {
+      // Send handshake frame with string ID "connect"
       ws.send(
         JSON.stringify({
           type: "req",
@@ -52,18 +76,15 @@ function gatewayRPC(
       try {
         const data = JSON.parse(event.data) as Record<string, unknown>;
 
-        if (data.type === "event" && data.event === "connect.challenge") {
-          // Already sent connect on open, ignore challenge variant
-          return;
-        }
-
+        // Handle connect response
         if (data.type === "res" && data.id === "connect") {
           if (data.ok === true) {
-            // Connected — now send the actual RPC
+            connected = true;
+            // Send the actual RPC with string ID
             ws.send(
               JSON.stringify({
                 type: "req",
-                id: 1,
+                id: "rpc-1",
                 method,
                 params,
               }),
@@ -81,7 +102,8 @@ function gatewayRPC(
           return;
         }
 
-        if (data.type === "res" && data.id === 1) {
+        // Handle RPC response
+        if (data.type === "res" && data.id === "rpc-1") {
           clearTimeout(timeout);
           ws.close();
           if (data.ok === true) {
@@ -104,11 +126,16 @@ function gatewayRPC(
 
     ws.onerror = (err) => {
       clearTimeout(timeout);
-      reject(new Error(`WebSocket error: ${err.message || "connection failed"}`));
+      reject(
+        new Error(`WebSocket error: ${err.message || "connection failed"}`),
+      );
     };
 
     ws.onclose = () => {
       clearTimeout(timeout);
+      if (!connected) {
+        reject(new Error("WebSocket closed before connection established"));
+      }
     };
   });
 }
@@ -214,11 +241,10 @@ export async function PATCH(request: Request) {
     if (!id) {
       return NextResponse.json(
         { error: "card id is required" },
-      { status: 400 },
+        { status: 400 },
       );
     }
 
-    // Build update params — only include provided fields
     const params: Record<string, unknown> = {
       boardId: WORKBOARD_BOARD_ID,
       id,
