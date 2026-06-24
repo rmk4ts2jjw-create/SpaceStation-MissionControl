@@ -88,7 +88,7 @@ export default function SystemMonitorPage() {
     };
 
     fetchSystemData();
-    const interval = setInterval(fetchSystemData, 5000);
+    const interval = setInterval(fetchSystemData, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -124,7 +124,7 @@ export default function SystemMonitorPage() {
         setTimeout(async () => {
           const r = await fetch("/api/system/monitor");
           if (r.ok) setSystemData(await r.json());
-        }, 2000);
+        }, 30000);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Action failed";
